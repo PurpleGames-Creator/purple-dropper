@@ -230,8 +230,9 @@
           <button id="btn-start" class="primary-btn">ゲームスタート</button>
 
           <div class="how">
-            📱 <b>左右スワイプ</b>で移動 / <b>タップ</b>で回転 / <b>下スワイプ</b>で一気に落とす<br>
-            🎛 画面下の <b>◀ ↺ ↻ ▶ ⤓</b> ボタンでも操作できます<br>
+            📱 <b>左右スワイプ</b>で移動 / <b>タップ</b>で回転<br>
+            ⬇ <b>下スワイプ</b>は動かした分だけ下がる。斜めに引けば下げながら左右にも寄れます<br>
+            🎛 画面下の <b>◀ ↺ ↻ ▶</b> でも操作。<b>⤓</b> を押した時だけ一気に落ちます<br>
             🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
             🎯 横1列そろえて消す。4列同時消し <b>QUAD</b> は大量得点！<br>
             🏆 スコアを世界中のプレイヤーと競おう
@@ -474,7 +475,7 @@
     }
     function softStep() {
       if (!cur || state !== "playing" || paused) return;
-      if (canMove(0, 1)) { cur.y++; score += 1; fallT = 0; lockT = 0; lastAction = "move"; }
+      if (canMove(0, 1)) { cur.y++; score += 1; fallT = 0; lockT = 0; lastAction = "move"; sfxMove(); }
     }
     function doHold() {
       if (!cur || !canHold || state !== "playing" || paused) return;
@@ -1117,39 +1118,40 @@
       const r = cv.getBoundingClientRect();
       return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
     }
+    // 盤面のドラッグは「指が 1 セルぶん動いたら 1 マス動かす」だけ。
+    // 縦横の軸は固定しないので、斜めに引けば下げながら左右にも寄せられる。
+    // ハードドロップは盤面ジェスチャーに割り当てない(⤓ ボタンと Space のみ)。
     let g = null;
     cv.addEventListener("pointerdown", function (e) {
       if (state !== "playing" || paused) return;
       const p = pt(e);
-      g = { x0: p.x, y0: p.y, lx: p.x, ly: p.y, t0: performance.now(), moved: 0, mode: "", dropped: false };
+      g = { x0: p.x, y0: p.y, lx: p.x, ly: p.y, t0: performance.now(), moved: 0, stepped: false, done: false };
       try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     });
     cv.addEventListener("pointermove", function (e) {
-      if (!g || state !== "playing" || paused) return;
+      if (!g || g.done || state !== "playing" || paused) return;
       const p = pt(e);
       const tdx = p.x - g.x0, tdy = p.y - g.y0;
       g.moved = Math.max(g.moved, Math.abs(tdx) + Math.abs(tdy));
-      if (!g.mode) {
-        if (Math.abs(tdx) > 11 && Math.abs(tdx) >= Math.abs(tdy)) g.mode = "h";
-        else if (tdy < -26) { doHold(); g.mode = "done"; }
-        else if (tdy > 14) { g.mode = "v"; g.ly = g.y0; }
+
+      // 上スワイプ = ホールド。まだ 1 マスも動かしていない時だけ受け付ける(1 ジェスチャー 1 回)
+      if (!g.stepped && tdy < -26 && Math.abs(tdy) > Math.abs(tdx)) {
+        doHold(); g.done = true; return;
       }
-      if (g.mode === "h") {
-        while (p.x - g.lx >= CELL) { if (!move(1)) { g.lx = p.x; break; } g.lx += CELL; }
-        while (p.x - g.lx <= -CELL) { if (!move(-1)) { g.lx = p.x; break; } g.lx -= CELL; }
-      } else if (g.mode === "v") {
-        const el = performance.now() - g.t0;
-        if (tdy > 85 && el < 250) { hardDrop(); g.dropped = true; g.mode = "done"; }
-        else { while (p.y - g.ly >= CELL) { softStep(); g.ly += CELL; } }
-      }
+
+      // 左右: 1 セル動くごとに 1 マス移動
+      while (p.x - g.lx >= CELL) { if (!move(1)) { g.lx = p.x; break; } g.lx += CELL; g.stepped = true; }
+      while (p.x - g.lx <= -CELL) { if (!move(-1)) { g.lx = p.x; break; } g.lx -= CELL; g.stepped = true; }
+
+      // 下: 1 セル動くごとに 1 段だけ下げる。上に戻した時は基準をそこへ引き直す(上へは動かさない)
+      while (p.y - g.ly >= CELL) { softStep(); g.ly += CELL; g.stepped = true; }
+      if (p.y < g.ly) g.ly = p.y;
     });
-    function endGesture(e) {
+    function endGesture() {
       if (!g) return;
-      const el = performance.now() - g.t0;
-      if (!g.mode && g.moved < 14 && el < 320) rotate(1);
-      else if (g.mode === "v" && !g.dropped) {
-        const p = pt(e); if (p.y - g.y0 > 55 && el < 330) hardDrop();
-      }
+      // 指がほとんど動かなかった(=1マスも動かさなかった)なら回転。
+      // 長さは見ない — ゆっくりタップして回転しないのが一番ストレスになるため
+      if (!g.done && !g.stepped && g.moved < 14) rotate(1);
       g = null;
     }
     cv.addEventListener("pointerup", endGesture);
