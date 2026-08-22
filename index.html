@@ -716,12 +716,12 @@
       try { localStorage.setItem("purple_dropper_muted", m ? "1" : "0"); } catch (e) {}
     }
 
-    /* --- BGM(150BPM・81小節ちょうどでループ) --- */
+    /* --- BGM(150BPM・19小節=30.400秒ちょうどでループ) --- */
     // 効果音を潰さないよう控えめ。masterGain に繋ぐので 🔊 ボタンで一緒に消える
     const BGM_VOLUME = 0.10;
     const bgm = new Audio("bgm.mp3");
     bgm.loop = true;
-    // 2MB あるのでタイトル画面の初回表示は待たせない。ゲーム開始時に取りに行く
+    // タイトル画面の初回表示を待たせない。ゲーム開始前に裏で取りに行く
     bgm.preload = "none";
     bgm.volume = BGM_VOLUME;   // ※iOS は element の volume を無視するので WebAudio Gain でも絞る
     let bgmSrc = null, bgmGain = null, bgmFade = null;
@@ -1286,6 +1286,11 @@
       el.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); fn(e); });
       el.addEventListener("touchstart", function (e) { e.preventDefault(); }, { passive: false });
       el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+      // click を使わなくなるとキーボード操作も落ちるので Enter / Space を拾い直す。
+      // window 側の keydown(Space = ハードドロップ)に届かないよう伝播も止める
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); fn(e); }
+      });
     }
     bindHold("pad-left", function () { startRepeat(-1); }, function () { stopRepeat(-1); });
     bindHold("pad-right", function () { startRepeat(1); }, function () { stopRepeat(1); });
