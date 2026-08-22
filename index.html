@@ -172,8 +172,11 @@
     }
     .ctrl-btn:active { transform: scale(0.92); }
     .ctrl-left { left: 2.2%; }
+    .ctrl-left2 { left: 15.5%; }
     .ctrl-right { right: 2.2%; }
     .ctrl-right2 { right: 15.5%; }
+    /* OFF のときは薄くして状態が分かるようにする */
+    .ctrl-btn.off { opacity: 0.38; }
     /* ---- HOLD hit area (canvas 上の HOLD 枠に重ねる。JS の HOLD_Y / HOLD_H と対応) ---- */
     .hold-hit {
       position: absolute; z-index: 7;
@@ -213,6 +216,7 @@
 
       <!-- 上部ボタン -->
       <button id="btn-home" class="ctrl-btn ctrl-left" aria-label="ホーム">🏠</button>
+      <button id="btn-ghost" class="ctrl-btn ctrl-left2" aria-label="着地ガイドの表示切り替え">👻</button>
       <button id="btn-mute" class="ctrl-btn ctrl-right2" aria-label="音のオン・オフ">🔊</button>
       <button id="btn-pause" class="ctrl-btn ctrl-right" aria-label="一時停止">⏸</button>
 
@@ -245,6 +249,7 @@
             ⬇ <b>下スワイプ</b>は動かした分だけ下がる。指を離さずに左右へ切り替えられます<br>
             🎛 画面下の <b>◀ ↺ ↻ ▶</b> でも操作。<b>⤓</b> を押した時だけ一気に落ちます<br>
             🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
+            👻 上の <b>👻</b> ボタンで着地位置ガイドの表示/非表示を切り替え<br>
             🎯 横1列そろえて消す。4列同時消し <b>QUAD</b> は大量得点！<br>
             🏆 スコアを世界中のプレイヤーと競おう
           </div>
@@ -415,6 +420,7 @@
     let playerName = "", bestScore = 0, previousBest = 0;
     let lastAction = "";      // T-spin 判定用: 直前の操作が回転だったか
     let muted = false;
+    let ghostOn = true;       // 着地位置ガイド(ゴースト)。無い方が良いという人がいるので切れるようにしている
 
     const LOCK_DELAY = 0.5, MAX_LOCK_RESET = 15, SOFT_IV = 0.028, CLEAR_TIME = 0.28;
     const LINE_SCORE = [0, 100, 300, 500, 800];
@@ -733,7 +739,14 @@
       try { localStorage.setItem("purple_dropper_muted", m ? "1" : "0"); } catch (e) {}
     }
 
-    /* --- BGM: 2曲をプレイごとに交互に鳴らす --- */
+    function setGhost(on) {
+      ghostOn = on;
+      const b = document.getElementById("btn-ghost");
+      if (b) b.classList.toggle("off", !on);
+      try { localStorage.setItem("purple_dropper_ghost", on ? "1" : "0"); } catch (e) {}
+    }
+
+    /* --- BGM: 3曲をプレイごとに順番に鳴らす --- */
     // 効果音を潰さないよう控えめ。masterGain に繋ぐので 🔊 ボタンで一緒に消える
     const BGM_VOLUME = 0.10;
     // 3曲とも小節ちょうどに切り出してあるのでループしても拍がズレない。
@@ -1151,7 +1164,7 @@
           if (!m[y][x]) continue;
           const bxp = cur.x + x, byp = gy + y;
           if (byp < 0 || byp >= ROWS) continue;
-          if (gy !== cur.y) drawGhostBlock(BX + bxp * CELL, BY + byp * CELL, CELL, COLORS[cur.type]);
+          if (ghostOn && gy !== cur.y) drawGhostBlock(BX + bxp * CELL, BY + byp * CELL, CELL, COLORS[cur.type]);
         }
         const lockFrac = groundedNow() ? Math.min(1, lockT / LOCK_DELAY) : 0;
         for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
@@ -1502,6 +1515,7 @@
       else if (k === "ArrowDown") softHold = true;
       else if (k === "Space") hardDrop();
       else if (k === "KeyC" || k === "ShiftLeft") doHold();
+      else if (k === "KeyG") { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF"); }
     });
     window.addEventListener("keyup", function (e) {
       const k = e.code;
@@ -1522,7 +1536,7 @@
     const overScreen = document.getElementById("over-screen");
     const pauseScreen = document.getElementById("pause-screen");
     const homeConfirm = document.getElementById("home-confirm");
-    const hudEls = ["btn-home", "btn-mute", "btn-pause", "btn-hold", "pad"].map(function (id) { return document.getElementById(id); });
+    const hudEls = ["btn-home", "btn-ghost", "btn-mute", "btn-pause", "btn-hold", "pad"].map(function (id) { return document.getElementById(id); });
 
     function syncHud() {
       const show = (state === "playing" || state === "clearing") && !paused
@@ -1675,6 +1689,7 @@
     document.getElementById("btn-resume").addEventListener("click", function (e) { e.stopPropagation(); setPause(false); });
     document.getElementById("btn-pause-top").addEventListener("click", function (e) { e.stopPropagation(); goToTop(); });
     bindTap("btn-mute", function () { audio(); setMuted(!muted); });
+    bindTap("btn-ghost", function () { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF"); });
     bindTap("btn-home", function () {
       if (state !== "playing" && state !== "clearing") return;
       paused = true;
@@ -1718,6 +1733,7 @@
         nickEl.value = nickEl.maxLength > 0 ? saved.slice(0, nickEl.maxLength) : saved;
       }
       setMuted(localStorage.getItem("purple_dropper_muted") === "1");
+      setGhost(localStorage.getItem("purple_dropper_ghost") !== "0");   // 既定は表示
     } catch (e) {}
 
     // タイトル表示が落ち着いた頃に BGM を裏で取りに行く。
@@ -1729,6 +1745,8 @@
       window.__dropper = {
         start: startGame, move: move, rotate: rotate, hardDrop: hardDrop, swap: doHold,
         tick: function (dt) { update(dt); },
+        redraw: function () { render(performance.now() / 1000); },
+        get ghost() { return ghostOn; },
         fill: function (rows, gap) {
           // 下から rows 行を gap 列だけ空けて埋める(ライン消しの検証用)
           for (let y = ROWS - rows; y < ROWS; y++) for (let x = 0; x < COLS; x++) board[y][x] = (x === gap ? null : "J");
