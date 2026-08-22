@@ -674,6 +674,7 @@
       state = "over";
       cur = null;
       softHold = false; repeat.dir = 0;
+      fadeOutBgm(700);
       sfxOver();
       syncHud();
       finishGame();
@@ -697,10 +698,77 @@
     function setMuted(m) {
       muted = m;
       if (masterGain) masterGain.gain.value = m ? 0 : 1;
+      // WebAudio が使えない環境では BGM が masterGain を通らないので element 側で絞る
+      if (!bgmGain) { try { bgm.volume = m ? 0 : BGM_VOLUME; } catch (e) {} }
       const b = document.getElementById("btn-mute");
       if (b) b.textContent = m ? "🔇" : "🔊";
       try { localStorage.setItem("purple_dropper_muted", m ? "1" : "0"); } catch (e) {}
     }
+
+    /* --- BGM(150BPM・81小節ちょうどでループ) --- */
+    // 効果音を潰さないよう控えめ。masterGain に繋ぐので 🔊 ボタンで一緒に消える
+    const BGM_VOLUME = 0.10;
+    const bgm = new Audio("bgm.mp3");
+    bgm.loop = true;
+    // 2MB あるのでタイトル画面の初回表示は待たせない。ゲーム開始時に取りに行く
+    bgm.preload = "none";
+    bgm.volume = BGM_VOLUME;   // ※iOS は element の volume を無視するので WebAudio Gain でも絞る
+    let bgmSrc = null, bgmGain = null, bgmFade = null;
+
+    function ensureBgmGraph() {
+      if (bgmSrc || !actx || !masterGain) return;
+      try {
+        bgmSrc = actx.createMediaElementSource(bgm);
+        bgmGain = actx.createGain();
+        bgmGain.gain.value = BGM_VOLUME;
+        bgmSrc.connect(bgmGain);
+        bgmGain.connect(masterGain);
+        bgm.volume = 1;   // 音量は Gain 側で持つ(二重に掛けない)
+      } catch (e) { bgmSrc = null; bgmGain = null; }
+    }
+    function clearBgmFade() { if (bgmFade) { clearTimeout(bgmFade); clearInterval(bgmFade); bgmFade = null; } }
+    function setBgmGain(v) {
+      if (bgmGain && actx) {
+        try {
+          const g = bgmGain.gain, t = actx.currentTime;
+          g.cancelScheduledValues(t); g.setValueAtTime(v, t);
+        } catch (e) { try { bgmGain.gain.value = v; } catch (e2) {} }
+      } else {
+        try { bgm.volume = muted ? 0 : v; } catch (e) {}
+      }
+    }
+    function playBgm() {
+      audio(); ensureBgmGraph();
+      clearBgmFade();
+      setBgmGain(BGM_VOLUME);
+      try { const p = bgm.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+    }
+    function pauseBgm() { clearBgmFade(); try { bgm.pause(); } catch (e) {} }
+    function fadeOutBgm(ms) {
+      clearBgmFade();
+      if (bgmGain && actx) {
+        try {
+          const g = bgmGain.gain, t = actx.currentTime;
+          g.cancelScheduledValues(t);
+          g.setValueAtTime(g.value, t);
+          g.linearRampToValueAtTime(0.0001, t + ms / 1000);
+        } catch (e) {}
+        bgmFade = setTimeout(function () { clearBgmFade(); try { bgm.pause(); } catch (e) {} }, ms + 40);
+      } else {
+        let v = BGM_VOLUME;
+        const step = BGM_VOLUME / Math.max(1, ms / 50);
+        bgmFade = setInterval(function () {
+          v -= step;
+          if (v <= 0) { clearBgmFade(); try { bgm.pause(); bgm.volume = muted ? 0 : BGM_VOLUME; } catch (e) {} }
+          else { try { bgm.volume = muted ? 0 : v; } catch (e) {} }
+        }, 50);
+      }
+    }
+    // アプリを裏に回したら止める(戻ってきてプレイ中なら鳴らし直す)
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) pauseBgm();
+      else if ((state === "playing" || state === "clearing") && !paused) playBgm();
+    });
     function tone(freq, dur, type, vol, glideTo, delay) {
       if (!actx || muted) return;
       const t0 = actx.currentTime + (delay || 0);
@@ -1283,17 +1351,20 @@
       previousBest = bestScore;
       hideAll();
       resetGame();
+      playBgm();
     }
 
     function setPause(p) {
       if (state !== "playing" && state !== "clearing") return;
       paused = p;
       repeat.dir = 0; softHold = false; g = null;
+      if (p) pauseBgm(); else playBgm();
       pauseScreen.classList.toggle("hidden", !p);
       syncHud();
     }
     function goToTop() {
       paused = false;
+      pauseBgm();
       state = "start"; cur = null;
       pauseScreen.classList.add("hidden");
       homeConfirm.classList.add("hidden");
@@ -1397,7 +1468,7 @@
     document.getElementById("btn-start").addEventListener("click", startGame);
     document.getElementById("nickname-input").addEventListener("keydown", function (e) { if (e.key === "Enter") startGame(); });
     document.getElementById("btn-retry").addEventListener("click", function () {
-      audio(); previousBest = bestScore; hideAll(); resetGame();
+      audio(); previousBest = bestScore; hideAll(); resetGame(); playBgm();
     });
     document.getElementById("btn-top").addEventListener("click", goToTop);
     document.getElementById("btn-pause").addEventListener("click", function (e) { e.stopPropagation(); setPause(!paused); });
@@ -1408,6 +1479,7 @@
       e.stopPropagation();
       if (state !== "playing" && state !== "clearing") return;
       paused = true;
+      pauseBgm();
       homeConfirm.classList.remove("hidden");
       syncHud();
     });
@@ -1417,6 +1489,7 @@
       homeConfirm.classList.add("hidden");
       if (!pauseScreen.classList.contains("hidden")) { syncHud(); return; }
       paused = false;
+      playBgm();
       syncHud();
     });
 
@@ -1448,6 +1521,10 @@
       setMuted(localStorage.getItem("purple_dropper_muted") === "1");
     } catch (e) {}
 
+    // タイトル表示が落ち着いた頃に BGM を裏で取りに行く。
+    // preload="none" のままだと開始直後に無音の間ができる
+    setTimeout(function () { try { bgm.preload = "auto"; bgm.load(); } catch (e) {} }, 1500);
+
     // 検証用フック(?debug 指定時のみ)
     if (location.search.indexOf("debug") >= 0) {
       window.__dropper = {
@@ -1462,6 +1539,15 @@
         setLevel: function (v) { level = v; },
         comboFreq: comboFreq,
         comboTop: COMBO_TOP,
+        get bgm() {
+          return {
+            paused: bgm.paused, ended: bgm.ended, loop: bgm.loop,
+            src: (bgm.currentSrc || bgm.src || "").split("/").pop(),
+            elVolume: bgm.volume, gain: bgmGain ? +bgmGain.gain.value.toFixed(4) : null,
+            t: +bgm.currentTime.toFixed(2), dur: +(bgm.duration || 0).toFixed(2)
+          };
+        },
+        get audioState() { return { muted: muted, master: masterGain ? +masterGain.gain.value.toFixed(3) : null }; },
         get ghostY() { return ghostY(); },
         get canHold() { return canHold; },
         get state() { return state; },
