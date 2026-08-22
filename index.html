@@ -693,7 +693,7 @@
     }
 
     /* ===================== 効果音 (WebAudio) ===================== */
-    let actx = null, masterGain = null;
+    let actx = null, masterGain = null, limiter = null;
     function audio() {
       if (!actx) {
         try {
@@ -701,7 +701,23 @@
           actx = new AC();
           masterGain = actx.createGain();
           masterGain.gain.value = muted ? 0 : 1;
-          masterGain.connect(actx.destination);
+          // QUAD のように音を何層も重ねると合計が 1.0 を超えて汚く歪む。
+          // 出口にリミッターを挟むことで、歪ませずに音圧だけ上げられる
+          try {
+            limiter = actx.createDynamicsCompressor();
+            // 常用域(1〜3列消し)には掛からず、QUAD の突出したピークだけを止める安全弁。
+            // 深く掛けると 3 列消しまで押さえて QUAD との音量差が縮む
+            limiter.threshold.value = -2;
+            limiter.knee.value = 3;
+            limiter.ratio.value = 20;
+            limiter.attack.value = 0.002;
+            limiter.release.value = 0.15;
+            masterGain.connect(limiter);
+            limiter.connect(actx.destination);
+          } catch (e) {
+            limiter = null;
+            masterGain.connect(actx.destination);
+          }
         } catch (e) { actx = null; }
       }
       if (actx && actx.state === "suspended") { try { actx.resume(); } catch (e) {} }
@@ -888,17 +904,26 @@
       noise(0.22, 0.12, 3400, 400);
     }
     function sfxQuad() {
-      tone(130.81, 0.60, "sine", 0.26);                  // ド(C3) 低音の土台
-      tone(196.00, 0.55, "sine", 0.16, null, 0.02);      // ソ(G3)
-      [523, 659, 784, 1046, 1319, 1568].forEach(function (f, i) {   // 1オクターブ半のアルペジオ
-        tone(f, 0.20, "triangle", 0.28, null, i * 0.045);
+      // ① 地鳴り。ピッチを一気に落として「殴られた」感を出す。豪華さの正体はここ
+      tone(120, 0.45, "sine", 0.55, 42);
+      tone(240, 0.30, "sine", 0.26, 84, 0.01);           // 1 オクターブ上も重ねて輪郭を立てる
+      // ② パワーコード(根音+5度+オクターブ)。sawtooth + わずかなデチューンで厚くする
+      [130.81, 196.00, 261.63].forEach(function (f, i) {
+        tone(f, 0.55, "sawtooth", 0.20, null, i * 0.012);
+        tone(f * 1.004, 0.55, "sawtooth", 0.15, null, i * 0.012);
+      });
+      // ③ 駆け上がり。triangle だと丸いので square + sawtooth で音を立てる
+      [523, 659, 784, 1046, 1319, 1568].forEach(function (f, i) {
+        tone(f, 0.22, "square", 0.22, null, i * 0.038);
+        tone(f * 1.005, 0.22, "sawtooth", 0.14, null, i * 0.038);
         // 倍音は 2kHz 以下だけ重ねる。それ以上は厚みにならず耳に刺さるだけ
-        if (f * 2 <= 2100) tone(f * 2, 0.12, "sine", 0.08, null, i * 0.045);
+        if (f * 2 <= 2100) tone(f * 2, 0.14, "sine", 0.10, null, i * 0.038);
       });
-      [2093, 2637].forEach(function (f, i) {             // 最後の抜け
-        tone(f, 0.14, "sine", 0.11, null, 0.30 + i * 0.05);
-      });
-      noise(0.45, 0.18, 5000, 300);
+      // ④ 最後の抜け
+      [2093, 2637].forEach(function (f, i) { tone(f, 0.18, "sine", 0.15, null, 0.26 + i * 0.045); });
+      // ⑤ 打撃のノイズ(低め・短く)とシンバルのノイズ(高く・長く伸ばす)
+      noise(0.18, 0.26, 1400, 200);
+      noise(0.70, 0.30, 9000, 400);
     }
     function sfxTspin() {
       // QUAD とは別物にする(QUAD を一番豪華な位置に残すため)。完全5度を重ねて上昇
@@ -1699,7 +1724,14 @@
             全トラック: bgmList.map(function (t, i) { return { i: i, src: t.src, paused: t.el.paused, preload: t.el.preload }; })
           };
         },
-        get audioState() { return { muted: muted, master: masterGain ? +masterGain.gain.value.toFixed(3) : null }; },
+        get audioState() {
+          return {
+            muted: muted,
+            master: masterGain ? +masterGain.gain.value.toFixed(3) : null,
+            state: actx ? actx.state : null,
+            limiterDb: limiter ? +limiter.reduction.toFixed(2) : null
+          };
+        },
         get ghostY() { return ghostY(); },
         get canHold() { return canHold; },
         get state() { return state; },
