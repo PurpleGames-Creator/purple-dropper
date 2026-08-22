@@ -242,7 +242,7 @@
 
           <div class="how">
             📱 <b>左右スワイプ</b>で移動 / <b>タップ</b>で回転<br>
-            ⬇ <b>下スワイプ</b>は動かした分だけ下がる。斜めに引けば下げながら左右にも寄れます<br>
+            ⬇ <b>下スワイプ</b>は動かした分だけ下がる。指を離さずに左右へ切り替えられます<br>
             🎛 画面下の <b>◀ ↺ ↻ ▶</b> でも操作。<b>⤓</b> を押した時だけ一気に落ちます<br>
             🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
             🎯 横1列そろえて消す。4列同時消し <b>QUAD</b> は大量得点！<br>
@@ -1395,6 +1395,7 @@
       if (state !== "playing" || paused) return;
       const p = pt(e);
       g = { x0: p.x, y0: p.y, lx: p.x, ly: p.y, t0: performance.now(), moved: 0, stepped: false, done: false,
+            px: p.x, py: p.y, wx: 0, wy: 0, axis: "",
             samples: [{ t: performance.now(), x: p.x, y: p.y }] };
       try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     });
@@ -1413,13 +1414,33 @@
         doHold(); g.done = true; return;
       }
 
-      // 左右: 1 セル動くごとに 1 マス移動
-      while (p.x - g.lx >= CELL) { if (!move(1)) { g.lx = p.x; break; } g.lx += CELL; g.stepped = true; }
-      while (p.x - g.lx <= -CELL) { if (!move(-1)) { g.lx = p.x; break; } g.lx -= CELL; g.stepped = true; }
+      // --- 斜めには動かさない。一度に効く軸は縦か横のどちらか一方だけ ---
+      // 直近の動き(減衰付きの累積)がどちらに寄っているかで軸を選ぶ。
+      // 一度決めた軸は、もう一方が AXIS_SWITCH 倍を超えるまで維持する(細かい揺れで軸が暴れないように)。
+      // 指は離さずに軸を切り替えられるので「右に寄せてから下げる」は 1 回のドラッグでできる
+      const idx = Math.abs(p.x - g.px), idy = Math.abs(p.y - g.py);
+      g.px = p.x; g.py = p.y;
+      g.wx = g.wx * AXIS_DECAY + idx;
+      g.wy = g.wy * AXIS_DECAY + idy;
+      if (!g.axis) {
+        if (g.wx + g.wy > 3) g.axis = g.wx >= g.wy ? "h" : "v";   // 1px の揺れで決めない
+      } else if (g.axis === "h" && g.wy > g.wx * AXIS_SWITCH) {
+        g.axis = "v";
+      } else if (g.axis === "v" && g.wx > g.wy * AXIS_SWITCH) {
+        g.axis = "h";
+      }
 
-      // 下: 1 セル動くごとに 1 段だけ下げる。上に戻した時は基準をそこへ引き直す(上へは動かさない)
-      while (p.y - g.ly >= CELL) { softStep(); g.ly += CELL; g.stepped = true; }
-      if (p.y < g.ly) g.ly = p.y;
+      if (g.axis === "h") {
+        // 効いていない側の基準は指に追従させる。切り替えた瞬間にいきなり飛ばないように
+        g.ly = p.y;
+        while (p.x - g.lx >= CELL) { if (!move(1)) { g.lx = p.x; break; } g.lx += CELL; g.stepped = true; }
+        while (p.x - g.lx <= -CELL) { if (!move(-1)) { g.lx = p.x; break; } g.lx -= CELL; g.stepped = true; }
+      } else if (g.axis === "v") {
+        g.lx = p.x;
+        // 1 セル動くごとに 1 段だけ下げる。上に戻した時は基準をそこへ引き直す(上へは動かさない)
+        while (p.y - g.ly >= CELL) { softStep(); g.ly += CELL; g.stepped = true; }
+        if (p.y < g.ly) g.ly = p.y;
+      }
     });
     // 「シュッと払って離した」= ハードドロップ。
     // 移動量や所要時間ではなく **指を離した瞬間の下向き速度** で見る。
@@ -1427,6 +1448,10 @@
     // 誤爆は取り消せないので閾値は厳しめ = 取りこぼす側に倒してある(⤓ ボタンがあるので困らない)
     // 短くシュッと払っただけでも反応するよう、距離・速度とも控えめにしてある。
     // 長くドラッグした後の払いも拾う(判定は総移動量ではなく「離す直前の動き」だけを見る)
+    // 斜め移動の禁止(軸ロック)のパラメータ
+    const AXIS_DECAY = 0.72;        // 直近の動きだけを見るための減衰。小さいほど切り替えが速い
+    const AXIS_SWITCH = 1.25;        // 軸を切り替えるのに必要な比。1 に近いほど軸が暴れる
+
     const FLICK_V = 0.6;            // canvas px / ms。ゆっくり狙って置く時は 0.1〜0.3 程度
     const FLICK_MIN = 1.2 * CELL;   // 判定窓の中で最低これだけ下に動いていること(約1.2マス)
     const FLICK_WINDOW = 90;      // 速度を測る窓(ms)
