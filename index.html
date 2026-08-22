@@ -51,6 +51,9 @@
       background: #1a1033;
       box-shadow: 0 0 60px rgba(124, 58, 237, 0.35);
       touch-action: none;
+      /* iOS の長押し拡大ルーペ対策(CSS だけでは足りず JS 側でも touchstart を潰している) */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none; user-select: none;
     }
     /* ---- Overlays ---- */
     .overlay {
@@ -163,6 +166,9 @@
       font-size: clamp(12px, 4.2vw, 17px);
       cursor: pointer; display: flex; align-items: center; justify-content: center;
       backdrop-filter: blur(2px); padding: 0;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none; user-select: none;
+      touch-action: none;
     }
     .ctrl-btn:active { transform: scale(0.92); }
     .ctrl-left { left: 2.2%; }
@@ -174,6 +180,9 @@
       left: 73.6%; top: 53.1%; width: 25%; height: 9.4%;
       background: transparent; border: none; padding: 0; cursor: pointer;
       border-radius: 8px;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none; user-select: none;
+      touch-action: none;
     }
     .hold-hit:active { background: rgba(168,130,255,0.28); }
     /* ---- bottom D-pad ---- */
@@ -190,6 +199,8 @@
       cursor: pointer; padding: 0;
       box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
       touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none; user-select: none;
     }
     .pad-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); filter: brightness(1.25); }
     .pad-btn.drop { background: linear-gradient(160deg, rgba(147,51,234,0.9), rgba(88,28,160,0.95)); color: #fff; }
@@ -566,8 +577,8 @@
         if (combo > 0) addPopup("COMBO x" + (combo + 1), "#5ee08a", 15, 0.3);
 
         if (n >= 4) { sfxQuad(); shake = Math.max(shake, 7); setEmote("🎉"); }
-        else if (tspin) { sfxQuad(); setEmote("✨"); }
-        else { sfxLine(n); setEmote(n >= 2 ? "✨" : "🎵"); }
+        else if (tspin) { sfxTspin(); setEmote("✨"); }
+        else { sfxLine(n); setEmote(n === 3 ? "🌟" : n === 2 ? "✨" : "🎵"); }
         sfxCombo(combo);
 
         clearRows = full; clearT = CLEAR_TIME; state = "clearing"; cur = null;
@@ -804,15 +815,47 @@
     function sfxLock()   { tone(140, 0.09, "sine", 0.22, 90); noise(0.07, 0.10, 900, 200); }
     function sfxDrop()   { noise(0.14, 0.16, 2200, 200); tone(180, 0.10, "sine", 0.18, 70); }
     function sfxHold()   { tone(420, 0.07, "triangle", 0.14, 620); }
-    function sfxLine(n)  {
-      const base = [0, 523, 587, 659][n] || 523;
-      for (let i = 0; i < n; i++) tone(base * Math.pow(1.15, i), 0.11, "triangle", 0.2, null, i * 0.05);
-      noise(0.18, 0.12, 3000, 400);
+    /* --- ライン消し: 消した段数ごとに別の音。4列(QUAD)が一番豪華になるよう積む --- */
+    // 1列: 単音 / 2列: 2音 / 3列: 3音+きらめき / 4列: 低音の土台+アルペジオ+抜け+長いスウィープ
+    function sfxSingle() {
+      tone(659, 0.10, "triangle", 0.20);                 // ミ
+      noise(0.12, 0.08, 2200, 500);
+    }
+    function sfxDouble() {
+      [659, 880].forEach(function (f, i) {               // ミ → ラ
+        tone(f, 0.11, "triangle", 0.22, null, i * 0.06);
+      });
+      noise(0.16, 0.10, 2800, 450);
+    }
+    function sfxTriple() {
+      [659, 880, 1046].forEach(function (f, i) {         // ミ → ラ → ド↑
+        tone(f, 0.12, "triangle", 0.24, null, i * 0.055);
+      });
+      [1319, 1760].forEach(function (f, i) {             // 上にきらめきを足す
+        tone(f, 0.09, "sine", 0.10, null, 0.17 + i * 0.05);
+      });
+      noise(0.22, 0.12, 3400, 400);
     }
     function sfxQuad() {
-      [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.16, "triangle", 0.24, null, i * 0.06); });
-      noise(0.3, 0.16, 4000, 300);
+      tone(130.81, 0.60, "sine", 0.26);                  // ド(C3) 低音の土台
+      tone(196.00, 0.55, "sine", 0.16, null, 0.02);      // ソ(G3)
+      [523, 659, 784, 1046, 1319, 1568].forEach(function (f, i) {   // 1オクターブ半のアルペジオ
+        tone(f, 0.20, "triangle", 0.28, null, i * 0.045);
+        // 倍音は 2kHz 以下だけ重ねる。それ以上は厚みにならず耳に刺さるだけ
+        if (f * 2 <= 2100) tone(f * 2, 0.12, "sine", 0.08, null, i * 0.045);
+      });
+      [2093, 2637].forEach(function (f, i) {             // 最後の抜け
+        tone(f, 0.14, "sine", 0.11, null, 0.30 + i * 0.05);
+      });
+      noise(0.45, 0.18, 5000, 300);
     }
+    function sfxTspin() {
+      // QUAD とは別物にする(QUAD を一番豪華な位置に残すため)。完全5度を重ねて上昇
+      [523, 784, 1046, 1568].forEach(function (f, i) { tone(f, 0.16, "square", 0.14, null, i * 0.05); });
+      [1046, 1568].forEach(function (f, i) { tone(f, 0.20, "sine", 0.12, null, 0.10 + i * 0.06); });
+      noise(0.26, 0.12, 4000, 600);
+    }
+    function sfxLine(n) { if (n >= 3) sfxTriple(); else if (n === 2) sfxDouble(); else sfxSingle(); }
     function sfxLevelUp() { [659, 880, 1174].forEach(function (f, i) { tone(f, 0.14, "square", 0.14, null, i * 0.07); }); }
 
     /* --- コンボ音: つなぐほど ド→レ→ミ… と長音階を1段ずつ上がる --- */
@@ -1232,6 +1275,16 @@
       ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) {
         el.addEventListener(ev, function (e) { e.preventDefault(); if (onUp) onUp(); });
       });
+      // iOS の長押し拡大ルーペは CSS だけでは止まらない。touchstart の既定動作ごと潰す
+      el.addEventListener("touchstart", function (e) { e.preventDefault(); }, { passive: false });
+      el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    }
+    // 上部の丸ボタン用。preventDefault すると click が発火しなくなるので押下は pointerdown で取る
+    function bindTap(id, fn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); fn(e); });
+      el.addEventListener("touchstart", function (e) { e.preventDefault(); }, { passive: false });
       el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     }
     bindHold("pad-left", function () { startRepeat(-1); }, function () { stopRepeat(-1); });
@@ -1249,11 +1302,19 @@
     // 盤面のドラッグは「指が 1 セルぶん動いたら 1 マス動かす」だけ。
     // 縦横の軸は固定しないので、斜めに引けば下げながら左右にも寄せられる。
     // ハードドロップは盤面ジェスチャーに割り当てない(⤓ ボタンと Space のみ)。
+    // iOS の長押し拡大ルーペ対策。CSS の -webkit-touch-callout / user-select では止まらず、
+    // touchstart / touchmove を passive:false で preventDefault して既定ジェスチャごと潰す必要がある。
+    // canvas は pointer 系イベントだけで操作しているので、click 互換イベントを潰しても影響しない
+    cv.addEventListener("touchstart", function (e) { e.preventDefault(); }, { passive: false });
+    cv.addEventListener("touchmove", function (e) { e.preventDefault(); }, { passive: false });
+    cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
     let g = null;
     cv.addEventListener("pointerdown", function (e) {
       if (state !== "playing" || paused) return;
       const p = pt(e);
-      g = { x0: p.x, y0: p.y, lx: p.x, ly: p.y, t0: performance.now(), moved: 0, stepped: false, done: false };
+      g = { x0: p.x, y0: p.y, lx: p.x, ly: p.y, t0: performance.now(), moved: 0, stepped: false, done: false,
+            samples: [{ t: performance.now(), x: p.x, y: p.y }] };
       try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     });
     cv.addEventListener("pointermove", function (e) {
@@ -1261,6 +1322,10 @@
       const p = pt(e);
       const tdx = p.x - g.x0, tdy = p.y - g.y0;
       g.moved = Math.max(g.moved, Math.abs(tdx) + Math.abs(tdy));
+      // 指を離した瞬間の速度を測るために直近の軌跡だけ持っておく
+      const nowMs = performance.now();
+      g.samples.push({ t: nowMs, x: p.x, y: p.y });
+      while (g.samples.length > 2 && nowMs - g.samples[0].t > FLICK_WINDOW + 60) g.samples.shift();
 
       // 上スワイプ = ホールド。まだ 1 マスも動かしていない時だけ受け付ける(1 ジェスチャー 1 回)
       if (!g.stepped && tdy < -26 && Math.abs(tdy) > Math.abs(tdx)) {
@@ -1275,11 +1340,38 @@
       while (p.y - g.ly >= CELL) { softStep(); g.ly += CELL; g.stepped = true; }
       if (p.y < g.ly) g.ly = p.y;
     });
+    // 「シュッと払って離した」= ハードドロップ。
+    // 移動量や所要時間ではなく **指を離した瞬間の下向き速度** で見る。
+    // 狙って置きたい時は人は必ず最後に減速するので、そこで速いソフトドロップと分離できる。
+    // 誤爆は取り消せないので閾値は厳しめ = 取りこぼす側に倒してある(⤓ ボタンがあるので困らない)
+    const FLICK_V = 1.2;          // canvas px / ms。実測で通常のドラッグは 0.2〜0.5 程度
+    const FLICK_MIN = 2 * CELL;   // 判定窓の中で最低これだけ下に動いていること
+    const FLICK_WINDOW = 90;      // 速度を測る窓(ms)
+    const FLICK_STALE = 70;       // 最後の pointermove から離すまでがこれ以内 = まだ動いていた
+
+    function isFlickDown() {
+      if (!g || g.done || !cur) return false;
+      const sm = g.samples;
+      if (sm.length < 2) return false;
+      const last = sm[sm.length - 1];
+      const now = performance.now();
+      if (now - last.t > FLICK_STALE) return false;      // 離す前に止まっていた
+      let i = sm.length - 1;
+      while (i > 0 && last.t - sm[i - 1].t <= FLICK_WINDOW) i--;
+      const dt = last.t - sm[i].t;
+      if (dt <= 0) return false;
+      const dy = last.y - sm[i].y, dx = Math.abs(last.x - sm[i].x);
+      if (dy < FLICK_MIN) return false;                  // 下向きに十分動いていない
+      if (dx > dy * 0.7) return false;                   // 横成分が強い = 払いではない
+      return dy / dt >= FLICK_V;
+    }
+
     function endGesture() {
       if (!g) return;
       // 指がほとんど動かなかった(=1マスも動かさなかった)なら回転。
       // 長さは見ない — ゆっくりタップして回転しないのが一番ストレスになるため
       if (!g.done && !g.stepped && g.moved < 14) rotate(1);
+      else if (isFlickDown()) hardDrop();
       g = null;
     }
     cv.addEventListener("pointerup", endGesture);
@@ -1471,12 +1563,11 @@
       audio(); previousBest = bestScore; hideAll(); resetGame(); playBgm();
     });
     document.getElementById("btn-top").addEventListener("click", goToTop);
-    document.getElementById("btn-pause").addEventListener("click", function (e) { e.stopPropagation(); setPause(!paused); });
+    bindTap("btn-pause", function () { setPause(!paused); });
     document.getElementById("btn-resume").addEventListener("click", function (e) { e.stopPropagation(); setPause(false); });
     document.getElementById("btn-pause-top").addEventListener("click", function (e) { e.stopPropagation(); goToTop(); });
-    document.getElementById("btn-mute").addEventListener("click", function (e) { e.stopPropagation(); audio(); setMuted(!muted); });
-    document.getElementById("btn-home").addEventListener("click", function (e) {
-      e.stopPropagation();
+    bindTap("btn-mute", function () { audio(); setMuted(!muted); });
+    bindTap("btn-home", function () {
       if (state !== "playing" && state !== "clearing") return;
       paused = true;
       pauseBgm();
