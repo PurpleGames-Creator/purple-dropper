@@ -153,7 +153,7 @@
     .toast {
       position: absolute; bottom: 16%; left: 50%; transform: translateX(-50%);
       background: rgba(13,7,30,0.92); color: #fff; padding: 10px 18px; border-radius: 20px;
-      font-size: 13px; z-index: 20; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+      font-size: 13px; z-index: 20; opacity: 0; transition: opacity 0.16s; pointer-events: none;
       border: 1px solid rgba(168,130,255,0.4); white-space: nowrap;
     }
     .toast.show { opacity: 1; }
@@ -1515,7 +1515,7 @@
       else if (k === "ArrowDown") softHold = true;
       else if (k === "Space") hardDrop();
       else if (k === "KeyC" || k === "ShiftLeft") doHold();
-      else if (k === "KeyG") { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF"); }
+      else if (k === "KeyG") { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF", 650); }
     });
     window.addEventListener("keyup", function (e) {
       const k = e.code;
@@ -1689,7 +1689,7 @@
     document.getElementById("btn-resume").addEventListener("click", function (e) { e.stopPropagation(); setPause(false); });
     document.getElementById("btn-pause-top").addEventListener("click", function (e) { e.stopPropagation(); goToTop(); });
     bindTap("btn-mute", function () { audio(); setMuted(!muted); });
-    bindTap("btn-ghost", function () { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF"); });
+    bindTap("btn-ghost", function () { setGhost(!ghostOn); toast(ghostOn ? "着地ガイド ON" : "着地ガイド OFF", 650); });
     bindTap("btn-home", function () {
       if (state !== "playing" && state !== "clearing") return;
       paused = true;
@@ -1716,11 +1716,12 @@
     bindRankArrows("rank-prev2", "rank-next2");
 
     let toastTimer = null;
-    function toast(msg) {
+    // ms を渡すと表示時間を変えられる。プレイ中に出るものは短くする(盤面に被って邪魔になるため)
+    function toast(msg, ms) {
       const el = document.getElementById("toast");
       el.textContent = msg; el.classList.add("show");
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(function () { el.classList.remove("show"); }, 1800);
+      toastTimer = setTimeout(function () { el.classList.remove("show"); }, ms || 1800);
     }
 
     /* ===================== 初期化 ===================== */
