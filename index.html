@@ -711,7 +711,7 @@
       muted = m;
       if (masterGain) masterGain.gain.value = m ? 0 : 1;
       // WebAudio が使えない環境では BGM が masterGain を通らないので element 側で絞る
-      if (!bgmGain) { bgmList.forEach(function (t) { try { t.el.volume = m ? 0 : BGM_VOLUME; } catch (e) {} }); }
+      if (!bgmGain) { bgmList.forEach(function (t) { try { t.el.volume = m ? 0 : BGM_VOLUME * (t.gain || 1); } catch (e) {} }); }
       const b = document.getElementById("btn-mute");
       if (b) b.textContent = m ? "🔇" : "🔊";
       try { localStorage.setItem("purple_dropper_muted", m ? "1" : "0"); } catch (e) {}
@@ -720,19 +720,21 @@
     /* --- BGM: 2曲をプレイごとに交互に鳴らす --- */
     // 効果音を潰さないよう控えめ。masterGain に繋ぐので 🔊 ボタンで一緒に消える
     const BGM_VOLUME = 0.10;
-    // どちらも 150BPM。小節ちょうどに切り出してあるのでループしても拍がズレない
+    // 3曲とも小節ちょうどに切り出してあるのでループしても拍がズレない。
+    // gain は曲ごとの音量補正。知覚音量(LUFS)を実測して bgm2 に揃えてある
     const BGM_TRACKS = [
-      { src: "bgm1.mp3" },   // 19 小節 / 30.400 秒
-      { src: "bgm2.mp3" }    // 81 小節 / 129.600 秒
+      { src: "bgm1.mp3", gain: 1.22 },   // 150BPM / 19 小節 /  30.400 秒 / -13.0 LUFS
+      { src: "bgm2.mp3", gain: 1.00 },   // 150BPM / 81 小節 / 129.600 秒 / -11.3 LUFS
+      { src: "bgm3.mp3", gain: 0.96 }    // 140BPM / 48 小節 /  82.286 秒 / -10.9 LUFS
     ];
     const BGM_KEY = "purple_dropper_bgm_next";
 
     const bgmList = BGM_TRACKS.map(function (t) {
       const el = new Audio(t.src);
       el.loop = true;
-      el.preload = "none";      // タイトル画面の初回表示を待たせない
-      el.volume = BGM_VOLUME;   // ※iOS は element の volume を無視するので Gain 側でも絞る
-      return { el: el, src: t.src, wired: false };
+      el.preload = "none";                    // タイトル画面の初回表示を待たせない
+      el.volume = BGM_VOLUME * (t.gain || 1); // ※iOS は element の volume を無視するので Gain 側でも絞る
+      return { el: el, src: t.src, gain: t.gain || 1, wired: false };
     });
     // 「次に鳴らす曲」を localStorage に持つ。こうしないと開き直すたびに 1 曲目に戻ってしまう
     let bgmNext = 0;
@@ -744,13 +746,15 @@
     let bgmGain = null, bgmFade = null;
 
     function bgmEl() { return bgmList[bgmPlaying].el; }
+    // いま鳴っている曲に音量補正を掛けた実効ゲイン
+    function bgmVol() { return BGM_VOLUME * (bgmList[bgmPlaying].gain || 1); }
 
     function ensureBgmGraph() {
       if (!actx || !masterGain) return;
       if (!bgmGain) {
         try {
           bgmGain = actx.createGain();
-          bgmGain.gain.value = BGM_VOLUME;
+          bgmGain.gain.value = bgmVol();
           bgmGain.connect(masterGain);
         } catch (e) { bgmGain = null; return; }
       }
@@ -777,13 +781,13 @@
           g.cancelScheduledValues(t); g.setValueAtTime(v, t);
         } catch (e) { try { bgmGain.gain.value = v; } catch (e2) {} }
       } else {
-        bgmList.forEach(function (t) { try { t.el.volume = muted ? 0 : v; } catch (e) {} });
+        bgmList.forEach(function (t) { try { t.el.volume = muted ? 0 : v * (t.gain || 1) / (bgmList[bgmPlaying].gain || 1); } catch (e) {} });
       }
     }
     function playBgm() {
       audio(); ensureBgmGraph();
       clearBgmFade();
-      setBgmGain(BGM_VOLUME);
+      setBgmGain(bgmVol());
       try { const p = bgmEl().play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
     }
     function pauseBgm() { clearBgmFade(); try { bgmEl().pause(); } catch (e) {} }
@@ -812,11 +816,12 @@
         } catch (e) {}
         bgmFade = setTimeout(function () { clearBgmFade(); try { el.pause(); } catch (e) {} }, ms + 40);
       } else {
-        let v = BGM_VOLUME;
-        const step = BGM_VOLUME / Math.max(1, ms / 50);
+        let v = bgmVol();
+        const step = v / Math.max(1, ms / 50);
+        const restore = bgmVol();
         bgmFade = setInterval(function () {
           v -= step;
-          if (v <= 0) { clearBgmFade(); try { el.pause(); el.volume = muted ? 0 : BGM_VOLUME; } catch (e) {} }
+          if (v <= 0) { clearBgmFade(); try { el.pause(); el.volume = muted ? 0 : restore; } catch (e) {} }
           else { try { el.volume = muted ? 0 : v; } catch (e) {} }
         }, 50);
       }
@@ -1395,8 +1400,10 @@
     // 移動量や所要時間ではなく **指を離した瞬間の下向き速度** で見る。
     // 狙って置きたい時は人は必ず最後に減速するので、そこで速いソフトドロップと分離できる。
     // 誤爆は取り消せないので閾値は厳しめ = 取りこぼす側に倒してある(⤓ ボタンがあるので困らない)
-    const FLICK_V = 1.2;          // canvas px / ms。実測で通常のドラッグは 0.2〜0.5 程度
-    const FLICK_MIN = 2 * CELL;   // 判定窓の中で最低これだけ下に動いていること
+    // 短くシュッと払っただけでも反応するよう、距離・速度とも控えめにしてある。
+    // 長くドラッグした後の払いも拾う(判定は総移動量ではなく「離す直前の動き」だけを見る)
+    const FLICK_V = 0.6;            // canvas px / ms。ゆっくり狙って置く時は 0.1〜0.3 程度
+    const FLICK_MIN = 1.2 * CELL;   // 判定窓の中で最低これだけ下に動いていること(約1.2マス)
     const FLICK_WINDOW = 90;      // 速度を測る窓(ms)
     const FLICK_STALE = 70;       // 最後の pointermove から離すまでがこれ以内 = まだ動いていた
 
