@@ -168,10 +168,10 @@
     .ctrl-left { left: 2.2%; }
     .ctrl-right { right: 2.2%; }
     .ctrl-right2 { right: 15.5%; }
-    /* ---- HOLD hit area (canvas 上の HOLD 枠に重ねる) ---- */
+    /* ---- HOLD hit area (canvas 上の HOLD 枠に重ねる。JS の HOLD_Y / HOLD_H と対応) ---- */
     .hold-hit {
       position: absolute; z-index: 7;
-      left: 73.6%; top: 36.6%; width: 25%; height: 8.6%;
+      left: 73.6%; top: 74.1%; width: 25%; height: 9.4%;
       background: transparent; border: none; padding: 0; cursor: pointer;
       border-radius: 8px;
     }
@@ -323,7 +323,10 @@
     const BW = COLS * CELL, BH = ROWS * CELL;  // 250 x 500 (=> 下端 552)
     const PX = 266, PW = 88;            // 右パネル
     const NEXT_Y = [72, 120, 168], NEXT_H = 44;
-    const HOLD_Y = 234, HOLD_H = 52;    // CSS の .hold-hit と位置を合わせている
+    const PAP_BOTTOM = 452;             // パプ子の足元(中段)
+    // HOLD は親指が届く一番下。ただし下端は 532 まで — 552 から始まる ⤓ ボタンと
+    // 20px 離して誤タップ(意図しないハードドロップ)を防いでいる。CSS の .hold-hit と対応
+    const HOLD_Y = 476, HOLD_H = 56;
 
     /* ===================== ピース定義 (SRS) ===================== */
     const SHAPES = {
@@ -980,33 +983,33 @@
         panelBox(PX, NEXT_Y[i], PW, NEXT_H, null);
         drawMiniPiece(queue[i], PX, NEXT_Y[i], PW, NEXT_H, i === 0 ? 13 : 10);
       }
-      // HOLD
+      // LEVEL / LINES
+      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
+      ctx.fillText("LEVEL", PX + PW / 2, 238);
+      ctx.fillStyle = "#f0c674"; ctx.font = "bold 20px sans-serif";
+      ctx.fillText(String(level), PX + PW / 2, 260);
+      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
+      ctx.fillText("LINES", PX + PW / 2, 286);
+      ctx.fillStyle = "#e9e0ff"; ctx.font = "bold 18px sans-serif";
+      ctx.fillText(String(lines), PX + PW / 2, 307);
+      // HOLD(親指が届きやすいよう一番下に置く)
       ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 11px sans-serif";
-      ctx.fillText("HOLD", PX + PW / 2, 226);
+      ctx.fillText("HOLD", PX + PW / 2, HOLD_Y - 8);
       ctx.save();
       if (!canHold) ctx.globalAlpha = 0.45;
       panelBox(PX, HOLD_Y, PW, HOLD_H, holdType ? null : "タップ");
       drawMiniPiece(holdType, PX, HOLD_Y, PW, HOLD_H, 13);
       ctx.restore();
-      // LEVEL / LINES
-      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
-      ctx.fillText("LEVEL", PX + PW / 2, 308);
-      ctx.fillStyle = "#f0c674"; ctx.font = "bold 20px sans-serif";
-      ctx.fillText(String(level), PX + PW / 2, 330);
-      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
-      ctx.fillText("LINES", PX + PW / 2, 356);
-      ctx.fillStyle = "#e9e0ff"; ctx.font = "bold 18px sans-serif";
-      ctx.fillText(String(lines), PX + PW / 2, 377);
       ctx.restore();
 
-      // パプ子
+      // パプ子(HOLD と入れ替えて中段に置いている)
       if (papReady) {
-        const maxW = 80, maxH = 130;
+        const maxW = 80, maxH = 118;
         const ratio = papImg.naturalWidth ? papImg.naturalHeight / papImg.naturalWidth : 1;
         let w = maxW, h = w * ratio;
         if (h > maxH) { h = maxH; w = h / ratio; }
         const bob = Math.sin(t * 2.4) * 3 + (emote.life > 0 ? Math.sin(t * 16) * 2 : 0);
-        const x = PX + (PW - w) / 2, y = 545 - h + bob;
+        const x = PX + (PW - w) / 2, y = PAP_BOTTOM - h + bob;
         ctx.save();
         ctx.globalAlpha = 0.96;
         ctx.drawImage(papImg, x, y, w, h);
