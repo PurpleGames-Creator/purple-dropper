@@ -562,11 +562,13 @@
         if (mult > 1) label = "B2B " + label;
         addPopup(label, n >= 4 || tspin ? "#ffd76b" : "#e9dcff", n >= 4 || tspin ? 22 : 17);
         addPopup("+" + gain, "#c4a0ff", 14, 0.34);
-        if (combo > 0) addPopup("COMBO x" + (combo + 1), "#5ee08a", 15, 0.6);
+        // 音(0.10秒後)と表示のタイミングを近づけて、同じ出来事だと分かるようにする
+        if (combo > 0) addPopup("COMBO x" + (combo + 1), "#5ee08a", 15, 0.3);
 
         if (n >= 4) { sfxQuad(); shake = Math.max(shake, 7); setEmote("🎉"); }
         else if (tspin) { sfxQuad(); setEmote("✨"); }
         else { sfxLine(n); setEmote(n >= 2 ? "✨" : "🎵"); }
+        sfxCombo(combo);
 
         clearRows = full; clearT = CLEAR_TIME; state = "clearing"; cur = null;
         flash = Math.min(1, 0.35 + n * 0.16);
@@ -744,6 +746,30 @@
       noise(0.3, 0.16, 4000, 300);
     }
     function sfxLevelUp() { [659, 880, 1174].forEach(function (f, i) { tone(f, 0.14, "square", 0.14, null, i * 0.07); }); }
+
+    /* --- コンボ音: つなぐほど ド→レ→ミ… と長音階を1段ずつ上がる --- */
+    const MAJOR = [0, 2, 4, 5, 7, 9, 11];  // ドレミファソラシ(基準からの半音数)
+    const COMBO_BASE = 523.25;             // C5 = ド
+    const COMBO_TOP = 11;                  // 打ち止め(2オクターブ手前の G6 あたり)。
+                                           // 上げ続けると 3kHz を超えて耳に痛くなるため
+    // combo=1(2連鎖目) が ド。周波数だけを返す純関数にして数列をテストできるようにしている
+    function comboFreq(n) {
+      const i = Math.min(Math.max(0, n - 1), COMBO_TOP);
+      const semi = MAJOR[i % 7] + 12 * Math.floor(i / 7);
+      return COMBO_BASE * Math.pow(2, semi / 12);
+    }
+    function sfxCombo(n) {
+      if (n < 1) return;
+      const i = Math.min(n - 1, COMBO_TOP);
+      const f = comboFreq(n);
+      const vol = Math.min(0.30, 0.17 + i * 0.013);
+      // ライン消し音と団子にならないよう 0.1 秒ずらして別レイヤーで鳴らす
+      tone(f, 0.16, "triangle", vol, null, 0.10);
+      tone(f * 2, 0.11, "sine", vol * 0.35, null, 0.10);   // 1 オクターブ上を薄く重ねて煌めき
+      // 打ち止め後は音程を上げず、同じ音をもう一度重ねて「まだ伸びている」を出す。
+      // さらに上の倍音を足すと 4kHz 超の耳に刺さる帯域に入るのでやらない
+      if (n - 1 > COMBO_TOP) tone(f, 0.10, "triangle", vol * 0.55, null, 0.24);
+    }
     function sfxOver() { [440, 349, 262, 196].forEach(function (f, i) { tone(f, 0.3, "sine", 0.22, null, i * 0.14); }); }
 
     /* ===================== 演出 ===================== */
@@ -1434,6 +1460,8 @@
         clearBoard: function () { newBoard(); },
         setPiece: function (type) { cur = makePiece(type); fallT = 0; lockT = 0; lockResets = 0; lastAction = ""; },
         setLevel: function (v) { level = v; },
+        comboFreq: comboFreq,
+        comboTop: COMBO_TOP,
         get ghostY() { return ghostY(); },
         get canHold() { return canHold; },
         get state() { return state; },
