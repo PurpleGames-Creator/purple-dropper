@@ -686,6 +686,7 @@
       cur = null;
       softHold = false; repeat.dir = 0;
       fadeOutBgm(700);
+      preloadBgm(bgmNext);   // 結果画面を見ている間に次の曲を用意しておく
       sfxOver();
       syncHud();
       finishGame();
@@ -710,32 +711,63 @@
       muted = m;
       if (masterGain) masterGain.gain.value = m ? 0 : 1;
       // WebAudio が使えない環境では BGM が masterGain を通らないので element 側で絞る
-      if (!bgmGain) { try { bgm.volume = m ? 0 : BGM_VOLUME; } catch (e) {} }
+      if (!bgmGain) { bgmList.forEach(function (t) { try { t.el.volume = m ? 0 : BGM_VOLUME; } catch (e) {} }); }
       const b = document.getElementById("btn-mute");
       if (b) b.textContent = m ? "🔇" : "🔊";
       try { localStorage.setItem("purple_dropper_muted", m ? "1" : "0"); } catch (e) {}
     }
 
-    /* --- BGM(150BPM・19小節=30.400秒ちょうどでループ) --- */
+    /* --- BGM: 2曲をプレイごとに交互に鳴らす --- */
     // 効果音を潰さないよう控えめ。masterGain に繋ぐので 🔊 ボタンで一緒に消える
     const BGM_VOLUME = 0.10;
-    const bgm = new Audio("bgm.mp3");
-    bgm.loop = true;
-    // タイトル画面の初回表示を待たせない。ゲーム開始前に裏で取りに行く
-    bgm.preload = "none";
-    bgm.volume = BGM_VOLUME;   // ※iOS は element の volume を無視するので WebAudio Gain でも絞る
-    let bgmSrc = null, bgmGain = null, bgmFade = null;
+    // どちらも 150BPM。小節ちょうどに切り出してあるのでループしても拍がズレない
+    const BGM_TRACKS = [
+      { src: "bgm1.mp3" },   // 19 小節 / 30.400 秒
+      { src: "bgm2.mp3" }    // 81 小節 / 129.600 秒
+    ];
+    const BGM_KEY = "purple_dropper_bgm_next";
+
+    const bgmList = BGM_TRACKS.map(function (t) {
+      const el = new Audio(t.src);
+      el.loop = true;
+      el.preload = "none";      // タイトル画面の初回表示を待たせない
+      el.volume = BGM_VOLUME;   // ※iOS は element の volume を無視するので Gain 側でも絞る
+      return { el: el, src: t.src, wired: false };
+    });
+    // 「次に鳴らす曲」を localStorage に持つ。こうしないと開き直すたびに 1 曲目に戻ってしまう
+    let bgmNext = 0;
+    try {
+      const v = parseInt(localStorage.getItem(BGM_KEY) || "0", 10);
+      if (!isNaN(v)) bgmNext = ((v % bgmList.length) + bgmList.length) % bgmList.length;
+    } catch (e) {}
+    let bgmPlaying = bgmNext;
+    let bgmGain = null, bgmFade = null;
+
+    function bgmEl() { return bgmList[bgmPlaying].el; }
 
     function ensureBgmGraph() {
-      if (bgmSrc || !actx || !masterGain) return;
-      try {
-        bgmSrc = actx.createMediaElementSource(bgm);
-        bgmGain = actx.createGain();
-        bgmGain.gain.value = BGM_VOLUME;
-        bgmSrc.connect(bgmGain);
-        bgmGain.connect(masterGain);
-        bgm.volume = 1;   // 音量は Gain 側で持つ(二重に掛けない)
-      } catch (e) { bgmSrc = null; bgmGain = null; }
+      if (!actx || !masterGain) return;
+      if (!bgmGain) {
+        try {
+          bgmGain = actx.createGain();
+          bgmGain.gain.value = BGM_VOLUME;
+          bgmGain.connect(masterGain);
+        } catch (e) { bgmGain = null; return; }
+      }
+      // createMediaElementSource は element ごとに 1 回しか呼べない
+      bgmList.forEach(function (t) {
+        if (t.wired) return;
+        try {
+          actx.createMediaElementSource(t.el).connect(bgmGain);
+          t.wired = true;
+          t.el.volume = 1;   // 音量は Gain 側で持つ(二重に掛けない)
+        } catch (e) {}
+      });
+    }
+    function preloadBgm(i) {
+      const t = bgmList[i];
+      if (!t || t.el.preload === "auto") return;
+      try { t.el.preload = "auto"; t.el.load(); } catch (e) {}
     }
     function clearBgmFade() { if (bgmFade) { clearTimeout(bgmFade); clearInterval(bgmFade); bgmFade = null; } }
     function setBgmGain(v) {
@@ -745,18 +777,32 @@
           g.cancelScheduledValues(t); g.setValueAtTime(v, t);
         } catch (e) { try { bgmGain.gain.value = v; } catch (e2) {} }
       } else {
-        try { bgm.volume = muted ? 0 : v; } catch (e) {}
+        bgmList.forEach(function (t) { try { t.el.volume = muted ? 0 : v; } catch (e) {} });
       }
     }
     function playBgm() {
       audio(); ensureBgmGraph();
       clearBgmFade();
       setBgmGain(BGM_VOLUME);
-      try { const p = bgm.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+      try { const p = bgmEl().play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
     }
-    function pauseBgm() { clearBgmFade(); try { bgm.pause(); } catch (e) {} }
+    function pauseBgm() { clearBgmFade(); try { bgmEl().pause(); } catch (e) {} }
+    // 新しいプレイを始めるたびに曲を 1 つ進める。2 曲なので前回と必ず違う曲になる。
+    // 切り替えは必ずユーザー操作(スタート/もう一回)の中で起きるので、iOS の自動再生制限に引っかからない
+    function startBgmForNewGame() {
+      clearBgmFade();
+      bgmList.forEach(function (t) { try { t.el.pause(); } catch (e) {} });
+      bgmPlaying = bgmNext;
+      bgmNext = (bgmNext + 1) % bgmList.length;
+      try { localStorage.setItem(BGM_KEY, String(bgmNext)); } catch (e) {}
+      try { bgmEl().currentTime = 0; } catch (e) {}
+      playBgm();
+      // 次の曲の先読みはここではやらない。プレイ中に裏で数MB取りに行くと
+      // 回線を食うため、結果画面を見ている間(gameOver)に回している
+    }
     function fadeOutBgm(ms) {
       clearBgmFade();
+      const el = bgmEl();
       if (bgmGain && actx) {
         try {
           const g = bgmGain.gain, t = actx.currentTime;
@@ -764,14 +810,14 @@
           g.setValueAtTime(g.value, t);
           g.linearRampToValueAtTime(0.0001, t + ms / 1000);
         } catch (e) {}
-        bgmFade = setTimeout(function () { clearBgmFade(); try { bgm.pause(); } catch (e) {} }, ms + 40);
+        bgmFade = setTimeout(function () { clearBgmFade(); try { el.pause(); } catch (e) {} }, ms + 40);
       } else {
         let v = BGM_VOLUME;
         const step = BGM_VOLUME / Math.max(1, ms / 50);
         bgmFade = setInterval(function () {
           v -= step;
-          if (v <= 0) { clearBgmFade(); try { bgm.pause(); bgm.volume = muted ? 0 : BGM_VOLUME; } catch (e) {} }
-          else { try { bgm.volume = muted ? 0 : v; } catch (e) {} }
+          if (v <= 0) { clearBgmFade(); try { el.pause(); el.volume = muted ? 0 : BGM_VOLUME; } catch (e) {} }
+          else { try { el.volume = muted ? 0 : v; } catch (e) {} }
         }, 50);
       }
     }
@@ -1448,7 +1494,7 @@
       previousBest = bestScore;
       hideAll();
       resetGame();
-      playBgm();
+      startBgmForNewGame();
     }
 
     function setPause(p) {
@@ -1565,7 +1611,7 @@
     document.getElementById("btn-start").addEventListener("click", startGame);
     document.getElementById("nickname-input").addEventListener("keydown", function (e) { if (e.key === "Enter") startGame(); });
     document.getElementById("btn-retry").addEventListener("click", function () {
-      audio(); previousBest = bestScore; hideAll(); resetGame(); playBgm();
+      audio(); previousBest = bestScore; hideAll(); resetGame(); startBgmForNewGame();
     });
     document.getElementById("btn-top").addEventListener("click", goToTop);
     bindTap("btn-pause", function () { setPause(!paused); });
@@ -1619,7 +1665,7 @@
 
     // タイトル表示が落ち着いた頃に BGM を裏で取りに行く。
     // preload="none" のままだと開始直後に無音の間ができる
-    setTimeout(function () { try { bgm.preload = "auto"; bgm.load(); } catch (e) {} }, 1500);
+    setTimeout(function () { preloadBgm(bgmNext); }, 1500);
 
     // 検証用フック(?debug 指定時のみ)
     if (location.search.indexOf("debug") >= 0) {
@@ -1636,11 +1682,14 @@
         comboFreq: comboFreq,
         comboTop: COMBO_TOP,
         get bgm() {
+          const el = bgmList[bgmPlaying].el;
           return {
-            paused: bgm.paused, ended: bgm.ended, loop: bgm.loop,
-            src: (bgm.currentSrc || bgm.src || "").split("/").pop(),
-            elVolume: bgm.volume, gain: bgmGain ? +bgmGain.gain.value.toFixed(4) : null,
-            t: +bgm.currentTime.toFixed(2), dur: +(bgm.duration || 0).toFixed(2)
+            playing: bgmPlaying, next: bgmNext, 曲数: bgmList.length,
+            paused: el.paused, loop: el.loop,
+            src: (el.currentSrc || el.src || "").split("/").pop(),
+            elVolume: el.volume, gain: bgmGain ? +bgmGain.gain.value.toFixed(4) : null,
+            t: +el.currentTime.toFixed(2), dur: +(el.duration || 0).toFixed(2),
+            全トラック: bgmList.map(function (t, i) { return { i: i, src: t.src, paused: t.el.paused, preload: t.el.preload }; })
           };
         },
         get audioState() { return { muted: muted, master: masterGain ? +masterGain.gain.value.toFixed(3) : null }; },
