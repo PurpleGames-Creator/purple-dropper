@@ -171,7 +171,7 @@
     /* ---- HOLD hit area (canvas 上の HOLD 枠に重ねる。JS の HOLD_Y / HOLD_H と対応) ---- */
     .hold-hit {
       position: absolute; z-index: 7;
-      left: 73.6%; top: 74.1%; width: 25%; height: 9.4%;
+      left: 73.6%; top: 53.1%; width: 25%; height: 9.4%;
       background: transparent; border: none; padding: 0; cursor: pointer;
       border-radius: 8px;
     }
@@ -316,17 +316,36 @@
     /* ===================== Canvas / レイアウト ===================== */
     const cv = document.getElementById("game");
     const ctx = cv.getContext("2d");
-    const W = cv.width, H = cv.height;
+    // 描画は常に 360x640 の論理座標で書く。実際のバッキングストアは
+    // 表示サイズ × devicePixelRatio に合わせて resizeCanvas() が張り替える
+    // (360x640 固定のままブラウザに引き伸ばさせると全体がボケる)
+    const W = 360, H = 640;
+    let rsx = 1, rsy = 1;   // 論理座標 → 実ピクセルの倍率
+    let sprDpr = 2;         // ブロックのスプライトを焼く解像度
+
+    function resizeCanvas() {
+      const r = cv.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(r.width * dpr));
+      const h = Math.max(1, Math.round(r.height * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      rsx = w / W; rsy = h / H;
+      // スプライトも実解像度に合わせて焼き直す(足りないとブロックだけボケる)
+      const nd = Math.min(4, Math.max(2, Math.ceil(Math.max(rsx, rsy))));
+      if (nd !== sprDpr) {
+        sprDpr = nd;
+        Object.keys(spriteCache).forEach(function (k) { delete spriteCache[k]; });
+      }
+    }
 
     const COLS = 10, ROWS = 20, CELL = 25;
     const BX = 10, BY = 52;             // 盤面の左上
     const BW = COLS * CELL, BH = ROWS * CELL;  // 250 x 500 (=> 下端 552)
     const PX = 266, PW = 88;            // 右パネル
     const NEXT_Y = [72, 120, 168], NEXT_H = 44;
-    const PAP_BOTTOM = 452;             // パプ子の足元(中段)
-    // HOLD は親指が届く一番下。ただし下端は 532 まで — 552 から始まる ⤓ ボタンと
-    // 20px 離して誤タップ(意図しないハードドロップ)を防いでいる。CSS の .hold-hit と対応
-    const HOLD_Y = 476, HOLD_H = 56;
+    const HOLD_Y = 342, HOLD_H = 56;    // HOLD は LINES のすぐ下。CSS の .hold-hit と位置を合わせている
+    const PAP_BOTTOM = 540;             // パプ子の足元(パネル最下段)
 
     /* ===================== ピース定義 (SRS) ===================== */
     const SHAPES = {
@@ -813,9 +832,9 @@
     // (毎フレーム 200 個以上のグラデーションを作ると低スペック端末で重い)
     const spriteCache = {};
     function blockSprite(color, size) {
-      const key = color + "|" + size;
+      const key = color + "|" + size + "|" + sprDpr;
       if (spriteCache[key]) return spriteCache[key];
-      const dpr = 2;
+      const dpr = sprDpr;
       const c = document.createElement("canvas");
       c.width = Math.round(size * dpr); c.height = Math.round(size * dpr);
       const g = c.getContext("2d");
@@ -967,7 +986,7 @@
       roundRect(x, y, w, h, 8); ctx.stroke();
       if (labelInside) {
         ctx.fillStyle = "rgba(155,139,196,0.75)";
-        ctx.font = "10px sans-serif"; ctx.textAlign = "center";
+        ctx.font = "11px sans-serif"; ctx.textAlign = "center";
         ctx.fillText(labelInside, x + w / 2, y + h / 2 + 3);
       }
       ctx.restore();
@@ -977,23 +996,23 @@
       ctx.save();
       ctx.textAlign = "center";
       // NEXT
-      ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 11px sans-serif";
+      ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 12px sans-serif";
       ctx.fillText("NEXT", PX + PW / 2, 64);
       for (let i = 0; i < 3; i++) {
         panelBox(PX, NEXT_Y[i], PW, NEXT_H, null);
         drawMiniPiece(queue[i], PX, NEXT_Y[i], PW, NEXT_H, i === 0 ? 13 : 10);
       }
       // LEVEL / LINES
-      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
-      ctx.fillText("LEVEL", PX + PW / 2, 238);
-      ctx.fillStyle = "#f0c674"; ctx.font = "bold 20px sans-serif";
-      ctx.fillText(String(level), PX + PW / 2, 260);
-      ctx.fillStyle = "#9b8bc4"; ctx.font = "10px sans-serif";
-      ctx.fillText("LINES", PX + PW / 2, 286);
-      ctx.fillStyle = "#e9e0ff"; ctx.font = "bold 18px sans-serif";
-      ctx.fillText(String(lines), PX + PW / 2, 307);
-      // HOLD(親指が届きやすいよう一番下に置く)
-      ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 11px sans-serif";
+      ctx.fillStyle = "#a898d0"; ctx.font = "bold 11px sans-serif";
+      ctx.fillText("LEVEL", PX + PW / 2, 240);
+      ctx.fillStyle = "#f0c674"; ctx.font = "bold 21px sans-serif";
+      ctx.fillText(String(level), PX + PW / 2, 263);
+      ctx.fillStyle = "#a898d0"; ctx.font = "bold 11px sans-serif";
+      ctx.fillText("LINES", PX + PW / 2, 289);
+      ctx.fillStyle = "#e9e0ff"; ctx.font = "bold 19px sans-serif";
+      ctx.fillText(String(lines), PX + PW / 2, 311);
+      // HOLD(LINES のすぐ下)
+      ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 12px sans-serif";
       ctx.fillText("HOLD", PX + PW / 2, HOLD_Y - 8);
       ctx.save();
       if (!canHold) ctx.globalAlpha = 0.45;
@@ -1002,9 +1021,9 @@
       ctx.restore();
       ctx.restore();
 
-      // パプ子(HOLD と入れ替えて中段に置いている)
+      // パプ子(パネルの一番下)
       if (papReady) {
-        const maxW = 80, maxH = 118;
+        const maxW = 86, maxH = 126;
         const ratio = papImg.naturalWidth ? papImg.naturalHeight / papImg.naturalWidth : 1;
         let w = maxW, h = w * ratio;
         if (h > maxH) { h = maxH; w = h / ratio; }
@@ -1028,7 +1047,7 @@
     function drawTopBar() {
       ctx.save();
       ctx.textAlign = "center";
-      ctx.fillStyle = "#9b8bc4"; ctx.font = "9px sans-serif";
+      ctx.fillStyle = "#a898d0"; ctx.font = "bold 10px sans-serif";
       ctx.fillText("SCORE", 156, 16);
       ctx.fillStyle = "#f4f0ff"; ctx.font = "bold 22px sans-serif";
       ctx.fillText(String(score), 156, 38);
@@ -1061,7 +1080,11 @@
     }
 
     function render(t) {
-      ctx.clearRect(0, 0, W, H);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.setTransform(rsx, 0, 0, rsy, 0, 0);   // 以降は 360x640 の論理座標で描ける
+      ctx.imageSmoothingEnabled = true;
+      if ("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = "high";
       ctx.save();
       if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
       drawTopBar();
@@ -1082,6 +1105,14 @@
       if (!paused) update(dt);
       render(t);
     }
+    // 表示サイズが変わったら実解像度を張り替える(回転・ツールバー出没・ウィンドウリサイズ)
+    resizeCanvas();
+    if (typeof ResizeObserver !== "undefined") {
+      try { new ResizeObserver(resizeCanvas).observe(cv); } catch (e) {}
+    }
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("orientationchange", resizeCanvas);
+
     requestAnimationFrame(loop);
 
     /* ===================== 入力 ===================== */
