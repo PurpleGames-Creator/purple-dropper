@@ -245,6 +245,7 @@
           <button id="btn-start" class="primary-btn">ゲームスタート</button>
 
           <div class="how">
+            ⛔ 赤いライン(中央4列の上端)より上に積むとゲームオーバー。左右3列は天井なし<br>
             🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
             ⚙️ 上の <b>👻</b> ボタンで着地位置ガイドの表示/非表示を切り替え<br>
             🏆 スコアを世界中のプレイヤーと競おう
@@ -352,6 +353,11 @@
     }
 
     const COLS = 10, ROWS = 20, CELL = 25;
+    // 盤面の上に隠し行を持つ。左右 SIDE 列には天井が無く、はみ出した分はここに積まれる。
+    // ゲームオーバー判定は中央 4 列だけ(そこが可視最上段より上まで積み上がった時)。
+    const HIDDEN = 4, TOTAL = ROWS + HIDDEN;
+    const SIDE = 3, MID_L = SIDE, MID_R = COLS - SIDE - 1;   // 中央 4 列 = x 3..6
+    function isMid(x) { return x >= MID_L && x <= MID_R; }
     const BX = 10, BY = 52;             // 盤面の左上
     const BW = COLS * CELL, BH = ROWS * CELL;  // 250 x 500 (=> 下端 552)
     const PX = 266, PW = 88;            // 右パネル
@@ -415,6 +421,7 @@
     let clearRows = [], clearT = 0;
     let playerName = "", bestScore = 0, previousBest = 0;
     let lastAction = "";      // T-spin 判定用: 直前の操作が回転だったか
+    let overReason = "";      // ゲームオーバーの原因(検証用)
     let muted = false;
     let ghostOn = true;       // 着地位置ガイド(ゴースト)。無い方が良いという人がいるので切れるようにしている
 
@@ -425,7 +432,7 @@
 
     function newBoard() {
       board = [];
-      for (let y = 0; y < ROWS; y++) { const row = []; for (let x = 0; x < COLS; x++) row.push(null); board.push(row); }
+      for (let y = 0; y < TOTAL; y++) { const row = []; for (let x = 0; x < COLS; x++) row.push(null); board.push(row); }
     }
 
     /* ===================== 7bag ===================== */
@@ -440,7 +447,7 @@
       return bag.pop();
     }
     function makePiece(type) {
-      return { type: type, rot: 0, x: (type === "O" ? 4 : 3), y: (type === "O" ? 0 : -1) };
+      return { type: type, rot: 0, x: (type === "O" ? 4 : 3), y: HIDDEN + (type === "O" ? 0 : -1) };
     }
 
     /* ===================== 判定 ===================== */
@@ -453,7 +460,7 @@
       const c = cellsOf(p);
       for (let i = 0; i < c.length; i++) {
         const x = c[i][0], y = c[i][1];
-        if (x < 0 || x >= COLS || y >= ROWS) return true;
+        if (x < 0 || x >= COLS || y >= TOTAL) return true;
         if (y >= 0 && board[y][x]) return true;
       }
       return false;
@@ -519,7 +526,7 @@
       else { holdType = t; cur = makePiece(queue.shift()); queue.push(nextFromBag()); }
       canHold = false; fallT = 0; lockT = 0; lockResets = 0; lastAction = "hold";
       sfxHold();
-      if (collides(cur)) gameOver();
+      if (collides(cur)) gameOver("hold");
     }
 
     /* ===================== T-spin ===================== */
@@ -530,7 +537,7 @@
       let n = 0;
       for (let i = 0; i < corners.length; i++) {
         const x = corners[i][0], y = corners[i][1];
-        if (x < 0 || x >= COLS || y >= ROWS) { n++; continue; }
+        if (x < 0 || x >= COLS || y >= TOTAL) { n++; continue; }
         if (y >= 0 && board[y][x]) n++;
       }
       return n >= 3;
@@ -540,10 +547,11 @@
     function lockPiece() {
       if (!cur) return;
       const c = cellsOf(cur);
-      let outOfField = false;
+      let outOfField = false;   // 中央 4 列が可視最上段より上まで積み上がった = ゲームオーバー
       for (let i = 0; i < c.length; i++) {
         const x = c[i][0], y = c[i][1];
-        if (y < 0) { outOfField = true; continue; }
+        if (y < HIDDEN && isMid(x)) outOfField = true;
+        if (y < 0) continue;    // 隠し行も突き抜けた分は保持できないので捨てる(左右 3 列だけが到達しうる)
         board[y][x] = cur.type;
       }
       const tspin = isTSpin();
@@ -551,13 +559,13 @@
       spawnDust(cur);
 
       const full = [];
-      for (let y = 0; y < ROWS; y++) {
+      for (let y = 0; y < TOTAL; y++) {
         let ok = true;
         for (let x = 0; x < COLS; x++) if (!board[y][x]) { ok = false; break; }
         if (ok) full.push(y);
       }
 
-      if (outOfField && full.length === 0) { cur = null; gameOver(); return; }
+      if (outOfField && full.length === 0) { cur = null; gameOver("lock"); return; }
 
       if (full.length > 0) {
         const n = full.length;
@@ -597,8 +605,8 @@
       const set = {};
       clearRows.forEach(function (y) { set[y] = true; });
       const kept = [];
-      for (let y = 0; y < ROWS; y++) if (!set[y]) kept.push(board[y]);
-      const removed = ROWS - kept.length;
+      for (let y = 0; y < TOTAL; y++) if (!set[y]) kept.push(board[y]);
+      const removed = TOTAL - kept.length;
       const fresh = [];
       for (let i = 0; i < removed; i++) { const row = []; for (let x = 0; x < COLS; x++) row.push(null); fresh.push(row); }
       board = fresh.concat(kept);
@@ -617,7 +625,7 @@
       queue.push(nextFromBag());
       canHold = true;
       fallT = 0; lockT = 0; lockResets = 0; lastAction = "";
-      if (collides(cur)) gameOver();
+      if (collides(cur)) gameOver("spawn");
     }
 
     /* ===================== ゲーム進行 ===================== */
@@ -683,7 +691,9 @@
       }
     }
 
-    function gameOver() {
+    // reason: "lock" = 中央4列で上端より上に固定 / "spawn" = 次のピースが置けない / "hold" = ホールド交換で置けない
+    function gameOver(reason) {
+      overReason = reason || "";
       state = "over";
       cur = null;
       softHold = false; repeat.dir = 0;
@@ -987,11 +997,11 @@
     function spawnDust(p) {
       const c = cellsOf(p);
       c.forEach(function (cc) {
-        if (cc[1] < 0) return;
+        if (cc[1] < HIDDEN) return;
         for (let i = 0; i < 2; i++) {
           particles.push({
             x: BX + cc[0] * CELL + CELL / 2 + (Math.random() - 0.5) * CELL,
-            y: BY + cc[1] * CELL + CELL,
+            y: BY + (cc[1] - HIDDEN) * CELL + CELL,
             vx: (Math.random() - 0.5) * 40, vy: -Math.random() * 40,
             life: 1, size: 1.5 + Math.random() * 2, color: COLORS[p.type]
           });
@@ -1003,7 +1013,7 @@
         for (let i = 0; i < 26; i++) {
           particles.push({
             x: BX + Math.random() * BW,
-            y: BY + y * CELL + CELL / 2,
+            y: BY + (y - HIDDEN) * CELL + CELL / 2,
             vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 140,
             life: 1, size: 2 + Math.random() * 3,
             color: Math.random() < 0.5 ? "#ffe9b8" : "#c4a0ff"
@@ -1106,13 +1116,19 @@
       ctx.restore();
     }
 
-    function stackTopRow() {
-      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x]) return y;
-      return ROWS;
+    // ゲームオーバー判定は中央 4 列だけなので、危険度もその高さで測る
+    function midTopRow() {
+      for (let y = 0; y < TOTAL; y++) for (let x = MID_L; x <= MID_R; x++) if (board[y][x]) return y;
+      return TOTAL;
+    }
+    // 隠し行(可視領域の上)に積まれている列の色。上端キャップ表示に使う
+    function hiddenTopType(x) {
+      for (let y = 0; y < HIDDEN; y++) if (board[y][x]) return board[y][x];
+      return null;
     }
 
     function drawBoardArea(t) {
-      const danger = stackTopRow() < 4;
+      const danger = midTopRow() - HIDDEN < 4;
       // 背景
       ctx.save();
       const bg = ctx.createLinearGradient(BX, BY, BX, BY + BH);
@@ -1131,6 +1147,27 @@
       ctx.strokeStyle = danger ? "rgba(255,107,138," + (0.5 + pulse * 0.5) + ")" : "rgba(168,130,255,0.45)";
       ctx.lineWidth = danger ? 3 : 2;
       roundRect(BX - 3, BY - 3, BW + 6, BH + 6, 8); ctx.stroke();
+
+      // 中央 4 列(=ゲームオーバー判定エリア)を示す。左右 3 列は天井が無いので、どこが危ないか見せる
+      const mx0 = BX + MID_L * CELL, mx1 = BX + (MID_R + 1) * CELL;
+      const zone = ctx.createLinearGradient(0, BY, 0, BY + CELL * 3);
+      zone.addColorStop(0, "rgba(255,107,138," + (danger ? 0.16 + pulse * 0.10 : 0.09) + ")");
+      zone.addColorStop(1, "rgba(255,107,138,0)");
+      ctx.fillStyle = zone;
+      ctx.fillRect(mx0, BY, mx1 - mx0, CELL * 3);
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(255,107,138,0.30)"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(mx0 + 0.5, BY); ctx.lineTo(mx0 + 0.5, BY + CELL * 4);
+      ctx.moveTo(mx1 - 0.5, BY); ctx.lineTo(mx1 - 0.5, BY + CELL * 4);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 中央 4 列の上端 = デンジャーライン。これより上に積むとゲームオーバー
+      ctx.strokeStyle = "rgba(255,107,138," + (danger ? 0.6 + pulse * 0.4 : 0.55) + ")";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(mx0, BY + 1); ctx.lineTo(mx1, BY + 1);
+      ctx.stroke();
       ctx.restore();
 
       // 固定ブロック
@@ -1138,11 +1175,11 @@
       const cset = {};
       clearRows.forEach(function (y) { cset[y] = true; });
       const blink = clearing ? (Math.floor(clearT * 24) % 2 === 0) : false;
-      for (let y = 0; y < ROWS; y++) {
+      for (let y = HIDDEN; y < TOTAL; y++) {
         for (let x = 0; x < COLS; x++) {
           const tt = board[y][x];
           if (!tt) continue;
-          const px = BX + x * CELL, py = BY + y * CELL;
+          const px = BX + x * CELL, py = BY + (y - HIDDEN) * CELL;
           if (cset[y]) {
             if (blink) { ctx.save(); ctx.fillStyle = "#ffffff"; roundRect(px + 2, py + 2, CELL - 4, CELL - 4, 5); ctx.fill(); ctx.restore(); }
             else drawBlock(px, py, CELL, COLORS[tt], 0.55);
@@ -1152,6 +1189,19 @@
         }
       }
 
+      // 隠し行(可視領域の上)まで積まれている列は、上端に▲を出して「まだ上に載っている」ことを知らせる
+      for (let x = 0; x < COLS; x++) {
+        const ht = hiddenTopType(x);
+        if (!ht) continue;
+        const cx = BX + x * CELL + CELL / 2;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx, BY + 2); ctx.lineTo(cx + 6, BY + 11); ctx.lineTo(cx - 6, BY + 11); ctx.closePath();
+        ctx.fillStyle = COLORS[ht]; ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.restore();
+      }
+
       // ゴースト + 現在のピース
       if (cur) {
         const gy = ghostY();
@@ -1159,15 +1209,15 @@
         for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
           if (!m[y][x]) continue;
           const bxp = cur.x + x, byp = gy + y;
-          if (byp < 0 || byp >= ROWS) continue;
-          if (ghostOn && gy !== cur.y) drawGhostBlock(BX + bxp * CELL, BY + byp * CELL, CELL, COLORS[cur.type]);
+          if (byp < HIDDEN || byp >= TOTAL) continue;
+          if (ghostOn && gy !== cur.y) drawGhostBlock(BX + bxp * CELL, BY + (byp - HIDDEN) * CELL, CELL, COLORS[cur.type]);
         }
         const lockFrac = groundedNow() ? Math.min(1, lockT / LOCK_DELAY) : 0;
         for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
           if (!m[y][x]) continue;
           const bxp = cur.x + x, byp = cur.y + y;
-          if (byp < 0) continue;
-          drawBlock(BX + bxp * CELL, BY + byp * CELL, CELL, COLORS[cur.type], 1 - lockFrac * 0.3);
+          if (byp < HIDDEN) continue;
+          drawBlock(BX + bxp * CELL, BY + (byp - HIDDEN) * CELL, CELL, COLORS[cur.type], 1 - lockFrac * 0.3);
         }
       }
 
@@ -1746,7 +1796,7 @@
         get ghost() { return ghostOn; },
         fill: function (rows, gap) {
           // 下から rows 行を gap 列だけ空けて埋める(ライン消しの検証用)
-          for (let y = ROWS - rows; y < ROWS; y++) for (let x = 0; x < COLS; x++) board[y][x] = (x === gap ? null : "J");
+          for (let y = TOTAL - rows; y < TOTAL; y++) for (let x = 0; x < COLS; x++) board[y][x] = (x === gap ? null : "J");
         },
         clearBoard: function () { newBoard(); },
         setPiece: function (type) { cur = makePiece(type); fallT = 0; lockT = 0; lockResets = 0; lastAction = ""; },
@@ -1772,6 +1822,9 @@
             limiterDb: limiter ? +limiter.reduction.toFixed(2) : null
           };
         },
+        hidden: HIDDEN, total: TOTAL, mid: [MID_L, MID_R],
+        get overReason() { return overReason; },
+        get midTop() { return midTopRow(); },
         get ghostY() { return ghostY(); },
         get canHold() { return canHold; },
         get state() { return state; },
