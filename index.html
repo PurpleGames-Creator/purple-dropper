@@ -245,7 +245,7 @@
           <button id="btn-start" class="primary-btn">ゲームスタート</button>
 
           <div class="how">
-            ⛔ 赤いライン(中央4列の上端)より上に積むとゲームオーバー。左右3列は天井なし<br>
+            ⛔ 中央4列の一番上より上に積むとゲームオーバー。左右3列は天井なし<br>
             🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
             ⚙️ 上の <b>👻</b> ボタンで着地位置ガイドの表示/非表示を切り替え<br>
             🏆 スコアを世界中のプレイヤーと競おう
@@ -1147,27 +1147,6 @@
       ctx.strokeStyle = danger ? "rgba(255,107,138," + (0.5 + pulse * 0.5) + ")" : "rgba(168,130,255,0.45)";
       ctx.lineWidth = danger ? 3 : 2;
       roundRect(BX - 3, BY - 3, BW + 6, BH + 6, 8); ctx.stroke();
-
-      // 中央 4 列(=ゲームオーバー判定エリア)を示す。左右 3 列は天井が無いので、どこが危ないか見せる
-      const mx0 = BX + MID_L * CELL, mx1 = BX + (MID_R + 1) * CELL;
-      const zone = ctx.createLinearGradient(0, BY, 0, BY + CELL * 3);
-      zone.addColorStop(0, "rgba(255,107,138," + (danger ? 0.16 + pulse * 0.10 : 0.09) + ")");
-      zone.addColorStop(1, "rgba(255,107,138,0)");
-      ctx.fillStyle = zone;
-      ctx.fillRect(mx0, BY, mx1 - mx0, CELL * 3);
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = "rgba(255,107,138,0.30)"; ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(mx0 + 0.5, BY); ctx.lineTo(mx0 + 0.5, BY + CELL * 4);
-      ctx.moveTo(mx1 - 0.5, BY); ctx.lineTo(mx1 - 0.5, BY + CELL * 4);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // 中央 4 列の上端 = デンジャーライン。これより上に積むとゲームオーバー
-      ctx.strokeStyle = "rgba(255,107,138," + (danger ? 0.6 + pulse * 0.4 : 0.55) + ")";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(mx0, BY + 1); ctx.lineTo(mx1, BY + 1);
-      ctx.stroke();
       ctx.restore();
 
       // 固定ブロック
