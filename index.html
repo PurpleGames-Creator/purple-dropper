@@ -34,6 +34,8 @@
       display: flex; align-items: center; justify-content: center;
       padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
       background: radial-gradient(circle at 50% 0%, #2a1856 0%, #140a2e 55%, #0b0617 100%);
+      /* レベル帯が上がると JS が背景を差し替える。硬く切り替わらない程度に短く効かせる */
+      transition: background 260ms ease;
     }
     .canvas-wrap {
       position: relative;
@@ -111,6 +113,29 @@
       transition: transform 0.08s ease, filter 0.15s ease;
     }
     .primary-btn:active { transform: scale(0.97); filter: brightness(1.1); }
+    /* ---- モード選択 ---- */
+    .mode-row { display: flex; gap: 6px; margin-top: 6px; }
+    .mode-btn {
+      flex: 1; padding: 9px 4px; font-size: 12.5px; font-weight: 700;
+      color: #c8b9ef; background: rgba(13,7,30,0.5);
+      border: 1px solid rgba(168,130,255,0.3); border-radius: 10px; cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .mode-btn.is-on {
+      color: #fff; border-color: rgba(196,160,255,0.85);
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+    }
+    .mode-how {
+      margin-top: 7px; font-size: 11px; line-height: 1.6; color: #a898d0;
+      min-height: 2.2em; text-align: left;
+    }
+    /* ---- リザルトの戦績チップ ---- */
+    .result-stats { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin: 10px 0 2px; }
+    .result-stats span {
+      font-size: 11px; color: #c8b9ef; background: rgba(13,7,30,0.5);
+      border: 1px solid rgba(168,130,255,0.25); border-radius: 999px; padding: 4px 9px;
+    }
+    .result-stats b { color: #f0c674; font-size: 12px; }
     .how {
       margin-top: 14px; font-size: 11.5px; line-height: 1.8; color: #c8b9ef;
       background: rgba(13,7,30,0.45); border-radius: 12px; padding: 10px 12px; text-align: left;
@@ -124,7 +149,9 @@
     }
     .rank-arrow { cursor: pointer; padding: 2px 10px; font-size: 18px; color: #a855f7; user-select: none; }
     .rank-arrow:active { color: #fff; }
-    .rank-title { width: 150px; }
+    .rank-title { width: 168px; line-height: 1.25; }
+    .rank-title .rt-mode { display: block; font-size: 10.5px; color: #c4a0ff; letter-spacing: 0.04em; }
+    .rank-title .rt-period { display: block; font-size: 13px; }
     .rank-list { list-style: none; padding: 0; margin: 0; max-height: 210px; overflow-y: auto; text-align: left; }
     .rank-list li {
       display: flex; justify-content: space-between; gap: 8px;
@@ -240,7 +267,15 @@
           </a>
           <div class="title">🟣 Purple Dropper 🟣</div>
 
-          <div class="label">ニックネームを入力してください</div>
+          <div class="label">モードを選ぶ</div>
+          <div class="mode-row" id="mode-row">
+            <button type="button" class="mode-btn is-on" data-mode="marathon">マラソン</button>
+            <button type="button" class="mode-btn" data-mode="sprint">スプリント</button>
+            <button type="button" class="mode-btn" data-mode="ultra">ウルトラ</button>
+          </div>
+          <div class="mode-how" id="mode-how"></div>
+
+          <div class="label" style="margin-top:12px;">ニックネームを入力してください</div>
           <input id="nickname-input" class="nick-input" type="text" maxlength="12" placeholder="例: むらさき太郎" />
           <button id="btn-start" class="primary-btn">ゲームスタート</button>
 
@@ -268,8 +303,9 @@
           <div id="over-title" class="title" style="font-size:24px;">GAME OVER</div>
           <div class="subtitle" id="over-nick"></div>
           <div class="new-record" id="new-record">✨ 自己ベスト更新！ ✨</div>
-          <div class="result-score">今回のスコア　<b id="res-current">0</b></div>
+          <div class="result-score"><span id="res-current-label">今回のスコア</span>　<b id="res-current">0</b></div>
           <div class="result-sub" id="res-detail">消したライン 0 ／ レベル 1</div>
+          <div class="result-stats" id="res-stats"></div>
           <div class="result-score" style="margin-top:10px;">自己ベスト　<span id="res-best">0</span></div>
           <div class="btn-row">
             <button id="btn-retry" class="btn-retry">もう一回</button>
@@ -318,6 +354,51 @@
     const SUPABASE_URL = "https://hefayilffszrczxhnpii.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhlZmF5aWxmZnN6cmN6eGhucGlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5NDI5NDEsImV4cCI6MjA4NzUxODk0MX0.qUsuQOIZzdlFLXtR-i1d9TX5c3P9QKPdhv34QGt4V_k";
     const RANKING_TABLE = "dropper_scores";
+
+    /* ===================== モード ===================== */
+    const SPRINT_LINES = 40;    // スプリントの目標ライン
+    const ULTRA_SEC = 120;      // ウルトラの制限時間(秒)
+    // col = ランキングに使う列。asc = 小さい方が上位(タイム勝負)
+    const MODES = [
+      { id: "marathon", name: "マラソン", table: "dropper_scores", col: "score", asc: false,
+        how: "エンドレス。積みきれなくなるまでスコアを伸ばす、いつもの遊び方" },
+      { id: "sprint", name: "スプリント", table: "dropper_sprint_scores", col: "time_ms", asc: true,
+        how: SPRINT_LINES + " ライン消すまでのタイムを競う。途中で積んで終わると記録は残らない" },
+      { id: "ultra", name: "ウルトラ", table: "dropper_ultra_scores", col: "score", asc: false,
+        how: "制限時間 " + (ULTRA_SEC / 60) + " 分。時間内にどれだけスコアを稼げるか" }
+    ];
+    let modeIdx = 0;
+    function M() { return MODES[modeIdx]; }
+    // モードごとに良し悪しの向きが逆。best = 0 は「記録なし」
+    function better(a, b) { return M().asc ? (b <= 0 || a < b) : a > b; }
+    function fmtTime(ms) {
+      const t = Math.max(0, Math.round(ms));
+      return Math.floor(t / 60000) + ":" + String(Math.floor((t % 60000) / 1000)).padStart(2, "0")
+        + "." + String(Math.floor((t % 1000) / 10)).padStart(2, "0");
+    }
+    function fmtClock(sec) {
+      const t = Math.max(0, Math.ceil(sec));
+      return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+    }
+
+    /* ===================== 背景(レベル帯で変わる) ===================== */
+    // app = 画面全体の radial-gradient / board = 盤面内の linear-gradient
+    const BG_TIERS = [
+      { app: ["#2a1856", "#140a2e", "#0b0617"], board: ["#150c30", "#0e0722"] },  // Lv1-4   紫(既定)
+      { app: ["#1b2a63", "#0e1533", "#070b1a"], board: ["#101a3a", "#080e24"] },  // Lv5-8   藍
+      { app: ["#0f3f5c", "#08202f", "#04121b"], board: ["#0a2a3e", "#051826"] },  // Lv9-12  青緑
+      { app: ["#4d1a5e", "#280d33", "#15061c"], board: ["#2c0f3a", "#180722"] },  // Lv13-16 赤紫
+      { app: ["#5e1436", "#330a1e", "#1b0510"], board: ["#3a0d24", "#210714"] }   // Lv17-20 深紅
+    ];
+    function bgTierOf(lv) { return Math.max(0, Math.min(BG_TIERS.length - 1, Math.floor((lv - 1) / 4))); }
+    let curTier = 0;
+    function applyBgTier(i, force) {
+      if (i === curTier && !force) return;
+      curTier = i;
+      const c = BG_TIERS[i].app;
+      const el = document.querySelector(".app");
+      if (el) el.style.background = "radial-gradient(circle at 50% 0%, " + c[0] + " 0%, " + c[1] + " 55%, " + c[2] + " 100%)";
+    }
     let supa = null;
     function getSupa() {
       if (!supa && window.supabase && window.supabase.createClient) {
@@ -416,6 +497,11 @@
     let board = [];
     let cur = null, holdType = null, canHold = true, queue = [], bag = [];
     let score = 0, lines = 0, level = 1, combo = -1, b2b = false;
+    let elapsed = 0;          // プレイ経過秒(ポーズ中は進まない)
+    let finishMs = 0;         // スプリントの確定タイム
+    let runResult = "";       // "" / "over"(失敗) / "clear"(スプリント完走) / "timeup"(ウルトラ終了)
+    function newStats() { return { pieces: 0, quads: 0, tsFull: 0, tsMini: 0, perfects: 0, maxChain: 0 }; }
+    let stats = newStats();
     let state = "start", paused = false;
     let fallT = 0, lockT = 0, lockResets = 0, softHold = false;
     let clearRows = [], clearT = 0;
@@ -595,6 +681,7 @@
         board[y][x] = cur.type;
       }
       const tsKind = tspinKind();
+      stats.pieces++;
       sfxLock();
       spawnDust(cur);
 
@@ -624,6 +711,11 @@
         gain += pcGain;
         score += gain;
         b2b = difficult;
+
+        if (n === 4) stats.quads++;
+        if (tsKind === "full") stats.tsFull++; else if (tsKind === "mini") stats.tsMini++;
+        if (perfect) stats.perfects++;
+        if (combo + 1 > stats.maxChain) stats.maxChain = combo + 1;
 
         const big = n >= 4 || tsKind === "full";
         let label = tsKind ? ("T-SPIN " + (mini ? "MINI " : "") + (CLEAR_NAME[n] || "")).trim() : CLEAR_NAME[n];
@@ -663,9 +755,18 @@
       const before = level;
       lines += removed;
       level = Math.min(20, 1 + Math.floor(lines / 10));
-      if (level > before) { sfxLevelUp(); addPopup("LEVEL " + level, "#3fd8ff", 20, 0.2); setEmote("🔥"); }
+      if (level > before) {
+        sfxLevelUp(); addPopup("LEVEL " + level, "#3fd8ff", 20, 0.2); setEmote("🔥");
+        applyBgTier(bgTierOf(level));   // レベル帯をまたいだら背景の色も変わる
+      }
 
       clearRows = []; state = "playing";
+      // スプリントは目標ライン到達で終了。次のミノは出さない
+      if (M().id === "sprint" && lines >= SPRINT_LINES) {
+        finishMs = Math.round(elapsed * 1000);
+        endRun("clear");
+        return;
+      }
       spawnNext();
     }
 
@@ -686,6 +787,8 @@
       for (let i = 0; i < 3; i++) queue.push(nextFromBag());
       holdType = null; canHold = true;
       score = 0; lines = 0; level = 1; combo = -1; b2b = false;
+      elapsed = 0; finishMs = 0; runResult = ""; stats = newStats();
+      applyBgTier(0, true);
       fallT = 0; lockT = 0; lockResets = 0; softHold = false;
       clearRows = []; clearT = 0; lastAction = "";
       particles = []; popups = []; shake = 0; flash = 0;
@@ -706,6 +809,12 @@
       if (emote.life > 0) emote.life -= dt;
       updateParticles(dt);
       updatePopups(dt);
+
+      // 経過時間。ポーズ中は update 自体が呼ばれないので、ここで足すだけでいい
+      if (state === "playing" || state === "clearing") {
+        elapsed += dt;
+        if (M().id === "ultra" && elapsed >= ULTRA_SEC) { elapsed = ULTRA_SEC; endRun("timeup"); return; }
+      }
 
       if (state === "clearing") {
         clearT -= dt;
@@ -743,12 +852,17 @@
     // reason: "lock" = 中央4列で上端より上に固定 / "spawn" = 次のピースが置けない / "hold" = ホールド交換で置けない
     function gameOver(reason) {
       overReason = reason || "";
+      endRun("over");
+    }
+    // kind: "over" = 積んで終了 / "clear" = スプリント完走 / "timeup" = ウルトラの時間切れ
+    function endRun(kind) {
+      runResult = kind;
       state = "over";
       cur = null;
       softHold = false; repeat.dir = 0;
       fadeOutBgm(700);
       preloadBgm(bgmNext);   // 結果画面を見ている間に次の曲を用意しておく
-      sfxOver();
+      if (kind === "over") sfxOver(); else sfxClear();
       syncHud();
       finishGame();
     }
@@ -1048,6 +1162,13 @@
       // さらに上の倍音を足すと 4kHz 超の耳に刺さる帯域に入るのでやらない
       if (n - 1 > COMBO_TOP) tone(f, 0.10, "triangle", vol * 0.55, null, 0.24);
     }
+    // スプリント完走 / ウルトラ完走の合図。ゲームオーバー音(下降)と真逆に上昇させる
+    function sfxClear() {
+      [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.26, "triangle", 0.22, null, i * 0.09); });
+      tone(1568, 0.50, "sine", 0.16, null, 0.36);
+      tone(784, 0.50, "sine", 0.12, null, 0.36);
+      noise(0.50, 0.14, 6000, 500, 0.36);
+    }
     function sfxOver() { [440, 349, 262, 196].forEach(function (f, i) { tone(f, 0.3, "sine", 0.22, null, i * 0.14); }); }
 
     /* ===================== 演出 ===================== */
@@ -1204,8 +1325,8 @@
       // 背景
       ctx.save();
       const bg = ctx.createLinearGradient(BX, BY, BX, BY + BH);
-      bg.addColorStop(0, "#150c30");
-      bg.addColorStop(1, "#0e0722");
+      bg.addColorStop(0, BG_TIERS[curTier].board[0]);
+      bg.addColorStop(1, BG_TIERS[curTier].board[1]);
       ctx.fillStyle = bg;
       roundRect(BX - 3, BY - 3, BW + 6, BH + 6, 8); ctx.fill();
       // グリッド
@@ -1330,10 +1451,20 @@
       ctx.fillText("LEVEL", PX + PW / 2, 240);
       ctx.fillStyle = "#f0c674"; ctx.font = "bold 21px sans-serif";
       ctx.fillText(String(level), PX + PW / 2, 263);
+      // 2 段目はモードごとに「今いちばん見たい数字」に差し替える
+      let subLabel = "LINES", subText = String(lines), subColor = "#e9e0ff";
+      if (M().id === "sprint") {
+        subLabel = "のこり"; subText = String(Math.max(0, SPRINT_LINES - lines));
+      } else if (M().id === "ultra") {
+        const left = Math.max(0, ULTRA_SEC - elapsed);
+        subLabel = "TIME"; subText = fmtClock(left);
+        // 残り 10 秒を切ったら赤く点滅させる
+        if (left <= 10) subColor = "rgba(255,107,138," + (0.6 + 0.4 * Math.sin(t * 9)).toFixed(3) + ")";
+      }
       ctx.fillStyle = "#a898d0"; ctx.font = "bold 11px sans-serif";
-      ctx.fillText("LINES", PX + PW / 2, 289);
-      ctx.fillStyle = "#e9e0ff"; ctx.font = "bold 19px sans-serif";
-      ctx.fillText(String(lines), PX + PW / 2, 311);
+      ctx.fillText(subLabel, PX + PW / 2, 289);
+      ctx.fillStyle = subColor; ctx.font = "bold 19px sans-serif";
+      ctx.fillText(subText, PX + PW / 2, 311);
       // HOLD(LINES のすぐ下)
       ctx.fillStyle = "#b9a7e8"; ctx.font = "bold 12px sans-serif";
       ctx.fillText("HOLD", PX + PW / 2, HOLD_Y - 8);
@@ -1370,10 +1501,12 @@
     function drawTopBar() {
       ctx.save();
       ctx.textAlign = "center";
+      // スプリントはタイムが記録そのものなので、一番大きい枠をタイムに譲る
+      const sprint = M().id === "sprint";
       ctx.fillStyle = "#a898d0"; ctx.font = "bold 10px sans-serif";
-      ctx.fillText("SCORE", 156, 16);
+      ctx.fillText(sprint ? "TIME" : "SCORE", 156, 16);
       ctx.fillStyle = "#f4f0ff"; ctx.font = "bold 22px sans-serif";
-      ctx.fillText(String(score), 156, 38);
+      ctx.fillText(sprint ? fmtTime(elapsed * 1000) : String(score), 156, 38);
       ctx.restore();
     }
 
@@ -1640,7 +1773,11 @@
         && pauseScreen.classList.contains("hidden") && homeConfirm.classList.contains("hidden");
       hudEls.forEach(function (el) { if (el) el.classList.toggle("hidden", !show); });
     }
-    function showStart() { startScreen.classList.remove("hidden"); overScreen.classList.add("hidden"); syncHud(); loadRanking(); }
+    function showStart() {
+      startScreen.classList.remove("hidden"); overScreen.classList.add("hidden");
+      applyBgTier(0, true);   // タイトルは常に既定の紫に戻す
+      syncHud(); loadRanking();
+    }
     function showOver() { overScreen.classList.remove("hidden"); syncHud(); }
     function hideAll() { startScreen.classList.add("hidden"); overScreen.classList.add("hidden"); }
 
@@ -1683,24 +1820,59 @@
     }
 
     /* ===================== 結果 / 送信 ===================== */
-    function localKey() { return "purple_dropper_best_" + ((playerName || "").trim() || "_"); }
+    // マラソンは従来のキーのまま(既存の自己ベストを引き継ぐ)。新モードだけ接頭辞を足す
+    function localKey() {
+      const m = M();
+      return "purple_dropper_best_" + (m.id === "marathon" ? "" : m.id + "_") + ((playerName || "").trim() || "_");
+    }
     function saveLocalBest() { try { localStorage.setItem(localKey(), String(bestScore)); } catch (e) {} }
     function loadLocalBest() { try { const v = parseInt(localStorage.getItem(localKey()) || "0", 10); bestScore = isNaN(v) ? 0 : v; } catch (e) { bestScore = 0; } }
 
+    function statsChips() {
+      const pps = elapsed > 0 ? stats.pieces / elapsed : 0;
+      const chips = [
+        ["QUAD", stats.quads],
+        ["T-SPIN", stats.tsFull + stats.tsMini],
+        ["うちミニ", stats.tsMini],
+        ["最大COMBO", stats.maxChain],
+        ["全消し", stats.perfects],
+        ["ミノ/秒", pps.toFixed(2)]
+      ];
+      return chips.map(function (c) { return "<span>" + c[0] + " <b>" + c[1] + "</b></span>"; }).join("");
+    }
+
     async function finishGame() {
-      const isNew = score > previousBest;
-      if (score > bestScore) bestScore = score;
+      const m = M();
+      const sprint = m.id === "sprint";
+      // スプリントは完走したときだけ記録になる(途中で積んだら DNF)
+      const valid = sprint ? runResult === "clear" : score > 0;
+      const val = sprint ? finishMs : score;
+      const isNew = valid && better(val, previousBest);
+      if (valid && better(val, bestScore)) bestScore = val;
       saveLocalBest();
-      document.getElementById("over-nick").textContent = "プレイヤー: " + (playerName || "ななしさん");
-      document.getElementById("res-current").textContent = score;
-      document.getElementById("res-detail").textContent = "消したライン " + lines + " ／ レベル " + level;
-      document.getElementById("res-best").textContent = bestScore;
-      document.getElementById("new-record").style.display = isNew && score > 0 ? "block" : "none";
+
+      document.getElementById("over-title").textContent =
+        runResult === "clear" ? "CLEAR!" : runResult === "timeup" ? "TIME UP" : "GAME OVER";
+      document.getElementById("over-nick").textContent =
+        "プレイヤー: " + (playerName || "ななしさん") + "（" + m.name + "）";
+      document.getElementById("res-current-label").textContent = sprint ? "今回のタイム" : "今回のスコア";
+      document.getElementById("res-current").textContent =
+        sprint ? (valid ? fmtTime(finishMs) : "記録なし") : String(score);
+      document.getElementById("res-detail").textContent = sprint
+        ? "消したライン " + lines + " ／ スコア " + score
+        : "消したライン " + lines + " ／ レベル " + level + " ／ " + fmtTime(elapsed * 1000);
+      document.getElementById("res-stats").innerHTML = statsChips();
+      document.getElementById("res-best").textContent =
+        bestScore > 0 ? (sprint ? fmtTime(bestScore) : String(bestScore)) : "—";
+      document.getElementById("new-record").style.display = isNew ? "block" : "none";
       showOver();
+
       const client = getSupa();
-      if (client && score > 0) {
+      if (client && valid) {
         try {
-          await client.from(RANKING_TABLE).insert({ nickname: (playerName || "").trim() || "ななしさん", score: score });
+          const row = { nickname: (playerName || "").trim() || "ななしさん" };
+          row[m.col] = val;
+          await client.from(m.table).insert(row);
         } catch (e) {}
       }
       loadRanking();
@@ -1713,10 +1885,12 @@
       { id: "all", name: "歴代ランキング" }
     ];
     let rankIdx = 0;
-    function rankLabel() {
+    function rankLabelHtml() {
       const m = rankModes[rankIdx];
-      if (m.id === "monthly") return (new Date().getMonth() + 1) + "月の月間ランキング";
-      return m.name;
+      const base = m.id === "monthly" ? (new Date().getMonth() + 1) + "月の月間"
+        : m.id === "daily" ? "今日の" : "歴代";
+      return '<span class="rt-mode">' + escapeHtml(M().name) + '</span>'
+        + '<span class="rt-period">' + base + 'ランキング</span>';
     }
     function rankDateFrom() {
       const m = rankModes[rankIdx], now = new Date();
@@ -1727,31 +1901,40 @@
     async function loadRanking() {
       const titles = [document.getElementById("rank-title"), document.getElementById("rank-title2")];
       const lists = [document.getElementById("rank-list"), document.getElementById("rank-list2")];
-      titles.forEach(function (el) { if (el) el.textContent = rankLabel(); });
+      titles.forEach(function (el) { if (el) el.innerHTML = rankLabelHtml(); });
       const client = getSupa();
       if (!client) { renderRankRows(lists, [{ muted: "ランキングを読み込めません" }]); return; }
       try {
+        const mode = M();
         const from = rankDateFrom();
-        let q = client.from(RANKING_TABLE).select("nickname, score, created_at").order("score", { ascending: false }).limit(3000);
+        let q = client.from(mode.table).select("nickname, " + mode.col + ", created_at")
+          .order(mode.col, { ascending: mode.asc }).limit(3000);
         if (from) q = q.gte("created_at", from);
         const res = await q;
         if (res.error) { renderRankRows(lists, [{ muted: "取得できませんでした" }]); return; }
         const byName = {};
         (res.data || []).forEach(function (row) {
           const n = (row.nickname || "").trim() || "ななし";
-          if (!(n in byName) || byName[n] < row.score) byName[n] = Number(row.score);
+          const v = Number(row[mode.col]);
+          if (!isFinite(v)) return;
+          // タイム勝負は小さい方、スコア勝負は大きい方を各人の代表値にする
+          if (!(n in byName) || (mode.asc ? v < byName[n] : v > byName[n])) byName[n] = v;
         });
         const uniq = Object.keys(byName).map(function (k) { return { nickname: k, score: byName[k] }; });
-        uniq.sort(function (a, b) { return b.score - a.score; });
+        uniq.sort(function (a, b) { return mode.asc ? a.score - b.score : b.score - a.score; });
         const top = uniq.slice(0, 100);
         const me = (playerName || "").trim();
-        if (me && byName[me] != null && byName[me] > bestScore) { bestScore = byName[me]; saveLocalBest(); }
+        if (me && byName[me] != null && better(byName[me], bestScore)) { bestScore = byName[me]; saveLocalBest(); }
         if (top.length === 0) { renderRankRows(lists, [{ muted: "まだ記録がありません" }]); return; }
         let prev = null, dispRank = 0;
         const rows = top.map(function (r, i) {
           if (r.score !== prev) dispRank = i + 1;
           prev = r.score;
-          return { rank: dispRank, nickname: r.nickname, score: r.score, me: me && r.nickname === me };
+          return {
+            rank: dispRank, nickname: r.nickname,
+            score: mode.col === "time_ms" ? fmtTime(r.score) : r.score,
+            me: me && r.nickname === me
+          };
         });
         renderRankRows(lists, rows);
       } catch (e) {
@@ -1776,6 +1959,28 @@
     function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
 
     /* ===================== 配線 ===================== */
+    /* --- モード選択 --- */
+    const modeRow = document.getElementById("mode-row");
+    const modeBtns = Array.prototype.slice.call(modeRow.querySelectorAll(".mode-btn"));
+    function syncModeUI() {
+      const m = M();
+      modeBtns.forEach(function (b) { b.classList.toggle("is-on", b.getAttribute("data-mode") === m.id); });
+      document.getElementById("mode-how").textContent = m.how;
+    }
+    modeBtns.forEach(function (b) {
+      b.addEventListener("click", function () {
+        const id = b.getAttribute("data-mode");
+        let i = -1;
+        for (let k = 0; k < MODES.length; k++) if (MODES[k].id === id) i = k;
+        if (i < 0 || i === modeIdx) return;
+        modeIdx = i;
+        try { localStorage.setItem("purple_dropper_mode", id); } catch (e) {}
+        syncModeUI();
+        loadLocalBest();   // 自己ベストはモードごとに別のキー
+        loadRanking();
+      });
+    });
+
     document.getElementById("btn-start").addEventListener("click", startGame);
     document.getElementById("nickname-input").addEventListener("keydown", function (e) { if (e.key === "Enter") startGame(); });
     document.getElementById("btn-retry").addEventListener("click", function () {
@@ -1830,6 +2035,8 @@
         const nickEl = document.getElementById("nickname-input");
         nickEl.value = nickEl.maxLength > 0 ? saved.slice(0, nickEl.maxLength) : saved;
       }
+      const savedMode = localStorage.getItem("purple_dropper_mode");
+      for (let k = 0; k < MODES.length; k++) if (MODES[k].id === savedMode) modeIdx = k;
       setMuted(localStorage.getItem("purple_dropper_muted") === "1");
       setGhost(localStorage.getItem("purple_dropper_ghost") !== "0");   // 既定は表示
     } catch (e) {}
@@ -1853,6 +2060,14 @@
         setPiece: function (type) { cur = makePiece(type); fallT = 0; lockT = 0; lockResets = 0; lastAction = ""; },
         setLevel: function (v) { level = v; },
         get tspinKind() { return tspinKind(); },
+        get mode() { return M().id; },
+        setMode: function (id) { for (let k = 0; k < MODES.length; k++) if (MODES[k].id === id) modeIdx = k; },
+        get elapsed() { return elapsed; },
+        setElapsed: function (v) { elapsed = v; },
+        get stats() { return JSON.parse(JSON.stringify(stats)); },
+        get runResult() { return runResult; },
+        get finishMs() { return finishMs; },
+        get bgTier() { return curTier; },
         get lastKick() { return lastKick; },
         get b2b() { return b2b; },
         get combo() { return combo; },
@@ -1904,6 +2119,7 @@
       };
     }
 
+    syncModeUI();
     showStart();
   })();
   </script>
