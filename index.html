@@ -124,6 +124,22 @@
     .mode-btn.is-on {
       color: #fff; border-color: rgba(196,160,255,0.85);
       background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      /* 選択中がひと目で分かるよう、枠まわりをゆっくり明滅させる */
+      animation: modeGlow 2.4s ease-in-out infinite;
+    }
+    @keyframes modeGlow {
+      0%, 100% {
+        border-color: rgba(196,160,255,0.5);
+        box-shadow: 0 0 4px rgba(168,130,255,0.2), 0 0 0 0 rgba(168,130,255,0);
+      }
+      50% {
+        border-color: rgba(232,212,255,1);
+        box-shadow: 0 0 16px rgba(168,130,255,0.75), 0 0 0 3px rgba(168,130,255,0.18);
+      }
+    }
+    /* 動きを減らす設定の端末では明滅させず、静かな光だけ残す */
+    @media (prefers-reduced-motion: reduce) {
+      .mode-btn.is-on { animation: none; box-shadow: 0 0 12px rgba(168,130,255,0.5); }
     }
     /* 文字数でカードの高さが動くと切り替えるたびに画面が伸び縮みするので、2 行ぶんで固定する */
     .mode-how {
