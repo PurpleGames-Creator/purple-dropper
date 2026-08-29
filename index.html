@@ -125,9 +125,11 @@
       color: #fff; border-color: rgba(196,160,255,0.85);
       background: linear-gradient(135deg, #7c3aed, #5b21b6);
     }
+    /* 文字数でカードの高さが動くと切り替えるたびに画面が伸び縮みするので、2 行ぶんで固定する */
     .mode-how {
       margin-top: 7px; font-size: 11px; line-height: 1.6; color: #a898d0;
-      min-height: 2.2em; text-align: left;
+      height: 36px; overflow: hidden;
+      display: flex; align-items: center; justify-content: center; text-align: center;
     }
     /* ---- リザルトの戦績チップ ---- */
     .result-stats { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin: 10px 0 2px; }
@@ -136,11 +138,6 @@
       border: 1px solid rgba(168,130,255,0.25); border-radius: 999px; padding: 4px 9px;
     }
     .result-stats b { color: #f0c674; font-size: 12px; }
-    .how {
-      margin-top: 14px; font-size: 11.5px; line-height: 1.8; color: #c8b9ef;
-      background: rgba(13,7,30,0.45); border-radius: 12px; padding: 10px 12px; text-align: left;
-    }
-    .how b { color: #f0c674; }
     /* ranking */
     .rank-box { margin-top: 16px; }
     .rank-head {
@@ -152,7 +149,19 @@
     .rank-title { width: 168px; line-height: 1.25; }
     .rank-title .rt-mode { display: block; font-size: 10.5px; color: #c4a0ff; letter-spacing: 0.04em; }
     .rank-title .rt-period { display: block; font-size: 13px; }
-    .rank-list { list-style: none; padding: 0; margin: 0; max-height: 210px; overflow-y: auto; text-align: left; }
+    /* 件数でカードの高さが動かないよう固定。中身が多いときはこの中だけがスクロールする */
+    .rank-list {
+      list-style: none; margin: 0; padding: 4px; text-align: left;
+      height: 168px; overflow-y: auto;
+      background: rgba(13,7,30,0.35);
+      border: 1px solid rgba(168,130,255,0.14); border-radius: 10px;
+      scrollbar-width: thin; scrollbar-color: rgba(168,130,255,0.35) transparent;
+    }
+    /* 「まだ記録がありません」等の 1 行だけの時は、固定枠の中央に置いて空白を馴染ませる */
+    .rank-list.is-empty { display: flex; align-items: center; justify-content: center; }
+    .rank-list::-webkit-scrollbar { width: 6px; }
+    .rank-list::-webkit-scrollbar-thumb { background: rgba(168,130,255,0.35); border-radius: 3px; }
+    .rank-list::-webkit-scrollbar-track { background: transparent; }
     .rank-list li {
       display: flex; justify-content: space-between; gap: 8px;
       padding: 4px 8px; font-size: 13px; border-radius: 8px; color: #e9e0ff;
@@ -279,13 +288,6 @@
           <input id="nickname-input" class="nick-input" type="text" maxlength="12" placeholder="例: むらさき太郎" />
           <button id="btn-start" class="primary-btn">ゲームスタート</button>
 
-          <div class="how">
-            ⛔ 中央4列の一番上より上に積むとゲームオーバー。左右3列は天井なし<br>
-            🔁 <b>HOLD</b> 枠をタップ(上スワイプ)でブロックを1個キープ<br>
-            ⚙️ 上の <b>👻</b> ボタンで着地位置ガイドの表示/非表示を切り替え<br>
-            🏆 スコアを世界中のプレイヤーと競おう
-          </div>
-
           <div class="rank-box">
             <div class="rank-head">
               <span id="rank-prev" class="rank-arrow">◀</span>
@@ -360,12 +362,13 @@
     const ULTRA_SEC = 120;      // ウルトラの制限時間(秒)
     // col = ランキングに使う列。asc = 小さい方が上位(タイム勝負)
     const MODES = [
+      // how は .mode-how の 2 行(36px)に収まる長さにすること。溢れると切れる
       { id: "marathon", name: "マラソン", table: "dropper_scores", col: "score", asc: false,
-        how: "エンドレス。積みきれなくなるまでスコアを伸ばす、いつもの遊び方" },
+        how: "エンドレス。積みきれなくなるまでスコアを伸ばす" },
       { id: "sprint", name: "スプリント", table: "dropper_sprint_scores", col: "time_ms", asc: true,
-        how: SPRINT_LINES + " ライン消すまでのタイムを競う。途中で積んで終わると記録は残らない" },
+        how: SPRINT_LINES + " ライン消すまでのタイムを競う。途中で積むと記録なし" },
       { id: "ultra", name: "ウルトラ", table: "dropper_ultra_scores", col: "score", asc: false,
-        how: "制限時間 " + (ULTRA_SEC / 60) + " 分。時間内にどれだけスコアを稼げるか" }
+        how: "制限時間 " + (ULTRA_SEC / 60) + " 分。時間内にスコアを稼ぐ" }
     ];
     let modeIdx = 0;
     function M() { return MODES[modeIdx]; }
@@ -1942,8 +1945,10 @@
       }
     }
     function renderRankRows(lists, rows) {
+      const onlyMessage = rows.length === 1 && !!rows[0].muted;
       lists.forEach(function (ol) {
         if (!ol) return;
+        ol.classList.toggle("is-empty", onlyMessage);
         ol.innerHTML = "";
         rows.forEach(function (r) {
           const li = document.createElement("li");
