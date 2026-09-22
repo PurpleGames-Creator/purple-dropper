@@ -80,9 +80,10 @@
       display: inline-flex; align-items: center; justify-content: center;
       margin-bottom: 10px; border-radius: 12px; text-decoration: none;
     }
+    /* HP へのパプ太郎(2026-09-22 Purple Park の文字ロゴから差し替え。全ゲームで統一) */
     .home-logo-image {
-      display: block; width: clamp(72px, 20vw, 104px); height: auto;
-      filter: drop-shadow(0 0 6px rgba(168, 130, 255, 0.4));
+      display: block; width: clamp(44px, 13vw, 56px); height: clamp(44px, 13vw, 56px);
+      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
     }
     .title {
       font-size: clamp(20px, 7vw, 28px); font-weight: 800; letter-spacing: 0.5px;
@@ -287,8 +288,8 @@
       <!-- START -->
       <div id="start-screen" class="overlay">
         <div class="card">
-          <a class="home-logo-link" href="https://purple-park.vercel.app/" aria-label="Purple Park へ移動">
-            <img src="logo.png" alt="Purple Park ロゴ" class="home-logo-image" draggable="false" />
+          <a class="home-logo-link" href="https://purple-park.vercel.app/" aria-label="Purple Games のホームページへ">
+            <img src="purplegames_icon.webp" width="128" height="128" alt="" class="home-logo-image" draggable="false" />
           </a>
           <div class="title">🟣 Purple Dropper 🟣</div>
 
